@@ -468,7 +468,10 @@ export class FootballGame {
         isSliding: false,
         slideTimer: 0,
         stamina: 100,
-        kickAnim: 0
+        kickAnim: 0,
+        protectionTimer: 0,
+        tackleCooldown: 0,
+        possessionTime: 0
       };
       meshData.root.position.set(p.x, 0, p.z);
       this.scene.add(meshData.root);
@@ -500,7 +503,10 @@ export class FootballGame {
         isSliding: false,
         slideTimer: 0,
         stamina: 100,
-        kickAnim: 0
+        kickAnim: 0,
+        protectionTimer: 0,
+        tackleCooldown: 0,
+        possessionTime: 0
       };
       meshData.root.position.set(p.x, 0, p.z);
       meshData.root.rotation.y = Math.PI;
@@ -669,9 +675,18 @@ export class FootballGame {
   // Aggiorna stato di un giocatore
   updatePlayer(p, inputData, dt) {
     const stats = p.charData;
+    const isHuman = (p.team === 1 && !this.options.isClient && p.index === this.activePlayerIdx1) ||
+                    (p.team === 2 && this.options.isClient && p.index === this.activePlayerIdx2);
+
+    if (p.protectionTimer > 0) p.protectionTimer -= dt;
+    if (p.tackleCooldown > 0) p.tackleCooldown -= dt;
+
     const baseSpeed = 13 + (stats.speed / 100) * 6; // 13 - 19 unità/sec
-    const speedMult = inputData.sprint ? 1.35 : 1.0;
-    const currentMaxSpeed = baseSpeed * speedMult;
+    // Il giocatore umano ha uno sprint più scattante (1.45x) e pieno controllo (100% velocità)
+    // La CPU si muove a un passo più calmo e umano (82%), senza mai sovrastare l'utente
+    const speedMult = inputData.sprint ? (isHuman ? 1.45 : 1.15) : 1.0;
+    const paceFactor = isHuman ? 1.0 : 0.82;
+    const currentMaxSpeed = baseSpeed * speedMult * paceFactor;
 
     // Gestione scivolata
     if (p.isSliding) {
@@ -684,16 +699,23 @@ export class FootballGame {
 
       // Controlla se colpisce la palla durante la scivolata
       const distBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
-      if (distBall < 2.0 && this.ball.holder !== p) {
-        // Ruba palla con forza
-        this.ball.holder = null;
-        const kickDirX = Math.sin(p.rot);
-        const kickDirZ = Math.cos(p.rot);
-        const tacklePwr = 18 + (stats.tackle / 100) * 12;
-        this.ball.vx = kickDirX * tacklePwr;
-        this.ball.vz = kickDirZ * tacklePwr;
-        this.ball.vy = 4;
-        sounds.playSlide();
+      if (distBall < 1.9 && this.ball.holder !== p) {
+        const holderIsHuman = this.ball.holder && (
+          (this.ball.holder.team === 1 && !this.options.isClient && this.ball.holder.index === this.activePlayerIdx1) ||
+          (this.ball.holder.team === 2 && this.options.isClient && this.ball.holder.index === this.activePlayerIdx2)
+        );
+
+        // Se il giocatore umano ha la palla ed è in protezione, non gliela si può scippare
+        if (!holderIsHuman || this.ball.holder.protectionTimer <= 0) {
+          this.ball.holder = null;
+          const kickDirX = Math.sin(p.rot);
+          const kickDirZ = Math.cos(p.rot);
+          const tacklePwr = 16 + (stats.tackle / 100) * 10;
+          this.ball.vx = kickDirX * tacklePwr;
+          this.ball.vz = kickDirZ * tacklePwr;
+          this.ball.vy = 3.5;
+          sounds.playSlide();
+        }
       }
 
       if (p.slideTimer <= 0) {
@@ -707,7 +729,7 @@ export class FootballGame {
     if (inputData.slideTrigger && !p.isSliding) {
       p.isSliding = true;
       p.slideTimer = 0.45;
-      const slideSpeed = currentMaxSpeed * 1.5;
+      const slideSpeed = currentMaxSpeed * 1.4;
       p.vx = Math.sin(p.rot) * slideSpeed;
       p.vz = Math.cos(p.rot) * slideSpeed;
       sounds.playSlide();
@@ -753,6 +775,8 @@ export class FootballGame {
 
     // Gestione possesso palla
     if (this.ball.holder === p) {
+      p.possessionTime += dt;
+
       // La palla segue il giocatore davanti ai suoi piedi
       const ballOffsetDist = 1.1 * p.scale;
       this.ball.x = p.x + Math.sin(p.rot) * ballOffsetDist;
@@ -821,16 +845,21 @@ export class FootballGame {
         sounds.playKick(0.7);
       }
     } else {
+      p.possessionTime = 0;
       // Controlla intercetto / aggancio palla vagante
       const distToBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
-      if (distToBall < 1.3 * p.scale && this.ball.y < 2.0 && !this.ball.holder) {
+      // Raggio di presa più comodo per il giocatore umano (1.65) rispetto alla CPU (1.05)
+      const pickupRadius = (isHuman ? 1.65 : 1.05) * p.scale;
+      if (distToBall < pickupRadius && this.ball.y < 2.2 && !this.ball.holder) {
         this.ball.holder = p;
+        p.possessionTime = 0;
+        p.protectionTimer = isHuman ? 0.9 : 0.3; // 0.9s di protezione iniziale al giocatore
         sounds.playKick(0.4);
       }
     }
   }
 
-  // Intelligenza Artificiale per i compagni di squadra e la CPU
+  // Intelligenza Artificiale Calibrata (Intelligente ma più passiva, lasciando il pieno controllo al giocatore)
   updateAI(p, dt) {
     const stats = p.charData;
     const aiInput = {
@@ -844,54 +873,151 @@ export class FootballGame {
       slideTrigger: false
     };
 
-    const team = (p.team === 1) ? this.playersTeam1 : this.playersTeam2;
-    const opponentTeam = (p.team === 1) ? this.playersTeam2 : this.playersTeam1;
+    const myTeam = (p.team === 1) ? this.playersTeam1 : this.playersTeam2;
+    const oppTeam = (p.team === 1) ? this.playersTeam2 : this.playersTeam1;
     const targetGoalX = (p.team === 1) ? this.FIELD_W / 2 : -this.FIELD_W / 2;
     const ownGoalX = (p.team === 1) ? -this.FIELD_W / 2 : this.FIELD_W / 2;
+
+    const isUserTeam = (p.team === (this.options.isClient ? 2 : 1));
+    const activeUserIdx = this.options.isClient ? this.activePlayerIdx2 : this.activePlayerIdx1;
+    const humanPlayer = isUserTeam ? myTeam[activeUserIdx] : oppTeam[activeUserIdx];
 
     const distToBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
     const hasBall = (this.ball.holder === p);
 
-    // Se l'AI ha palla
+    // ============================================
+    // 1. IL GIOCATORE AI HA LA PALLA
+    // ============================================
     if (hasBall) {
-      const distToTargetGoal = Math.abs(targetGoalX - p.x);
-
-      // Se è vicino alla porta avversaria (sotto i 24m), carica il tiro e tira!
-      if (distToTargetGoal < 24) {
-        aiInput.shootTrigger = true;
-        aiInput.shotPower = 0.8 + Math.random() * 0.2;
-      } else {
-        // Altrimenti avanza verso la porta o passa
-        const goalDirX = (targetGoalX - p.x);
-        const goalDirZ = (0 - p.z) * 0.3;
-        const len = Math.hypot(goalDirX, goalDirZ);
-        aiInput.moveX = goalDirX / len;
-        aiInput.moveZ = goalDirZ / len;
-        aiInput.sprint = true;
-
-        // Possibilità di passaggio a compagno libero
-        if (Math.random() < 0.02) {
+      if (isUserTeam) {
+        // Compagno di squadra dell'utente ha la palla: cerca passaggio all'utente o avanza
+        const distToHuman = Math.hypot(p.x - humanPlayer.x, p.z - humanPlayer.z);
+        if (p !== humanPlayer && distToHuman < 26 && Math.random() < 0.04) {
           aiInput.passTrigger = true;
+        } else {
+          const dx = targetGoalX - p.x;
+          const dz = -p.z * 0.35;
+          const len = Math.hypot(dx, dz);
+          aiInput.moveX = dx / len;
+          aiInput.moveZ = dz / len;
+        }
+      } else {
+        // CPU avversaria ha la palla: avanza a passo controllato (senza sprintare)
+        const distToGoal = Math.abs(targetGoalX - p.x);
+
+        // Tira SOLO se molto vicina alla porta (< 15 metri) e centrale, dopo aver controllato la palla
+        if (distToGoal < 15 && Math.abs(p.z) < 9 && p.possessionTime > 0.8) {
+          aiInput.shootTrigger = true;
+          aiInput.shotPower = 0.55 + Math.random() * 0.25;
+        } else {
+          // Avanza verso la porta a passo moderato
+          const dirX = targetGoalX - p.x;
+          const dirZ = -p.z * 0.3;
+          const len = Math.hypot(dirX, dirZ);
+          aiInput.moveX = dirX / len;
+          aiInput.moveZ = dirZ / len;
+          aiInput.sprint = false; // Non scatta: l'utente può raggiungerla e toglierle palla!
+
+          // Passaggio occasionale al compagno
+          if (p.possessionTime > 1.2 && Math.random() < 0.025) {
+            aiInput.passTrigger = true;
+          }
         }
       }
-    } else {
-      // In base al ruolo:
-      if (p.role === 'gk') {
-        // Difensore/Portiere saracinesca: rimane tra la palla e la propria porta
-        const idealX = ownGoalX + (p.team === 1 ? 6 : -6);
-        const idealZ = Math.max(-this.GOAL_W / 2 + 1, Math.min(this.GOAL_W / 2 - 1, this.ball.z * 0.6));
+    }
+    // ============================================
+    // 2. NESSUNO HA LA PALLA (PALLA VAGANTE)
+    // ============================================
+    else if (!this.ball.holder) {
+      const humanDistToBall = Math.hypot(humanPlayer.x - this.ball.x, humanPlayer.z - this.ball.z);
 
-        // Se la palla è molto vicina alla porta, esce a prenderla
-        if (Math.abs(this.ball.x - ownGoalX) < 14) {
+      if (isUserTeam) {
+        // Compagno di squadra: se l'utente è vicino alla palla (< 16m), lascia prendere la palla all'utente!
+        if (humanDistToBall < 16) {
+          // Si smarca in avanti per ricevere il passaggio
+          const targetX = humanPlayer.x + (p.team === 1 ? 12 : -12);
+          const targetZ = p.baseZ + (this.ball.z * 0.3);
+          const dx = targetX - p.x;
+          const dz = targetZ - p.z;
+          const len = Math.hypot(dx, dz);
+          if (len > 1.0) {
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+          }
+        } else {
+          // Va verso la palla per recuperarla
           const dx = this.ball.x - p.x;
           const dz = this.ball.z - p.z;
           const len = Math.hypot(dx, dz);
           aiInput.moveX = dx / len;
           aiInput.moveZ = dz / len;
-          if (distToBall < 3.0 && Math.random() < 0.05) {
-            aiInput.slideTrigger = true;
+        }
+      } else {
+        // CPU avversaria su palla vagante:
+        // Se l'utente è entro 14 metri dalla palla, la CPU dà priorità al giocatore
+        const userHasPriority = (humanDistToBall < 14);
+
+        if (p.role === 'gk') {
+          // Il portiere difende l'area
+          const idealX = ownGoalX + (p.team === 1 ? 5.5 : -5.5);
+          const idealZ = Math.max(-this.GOAL_W / 2 + 1, Math.min(this.GOAL_W / 2 - 1, this.ball.z * 0.6));
+          if (Math.abs(this.ball.x - ownGoalX) < 10) {
+            const dx = this.ball.x - p.x;
+            const dz = this.ball.z - p.z;
+            const len = Math.hypot(dx, dz);
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+          } else {
+            const dx = idealX - p.x;
+            const dz = idealZ - p.z;
+            const len = Math.hypot(dx, dz);
+            if (len > 1.0) {
+              aiInput.moveX = dx / len;
+              aiInput.moveZ = dz / len;
+            }
           }
         } else {
+          // Solo il giocatore CPU più vicino va verso la palla (se l'utente non è già vicino)
+          let closestCpu = myTeam[0];
+          let minCpuDist = 9999;
+          myTeam.forEach(cp => {
+            const d = Math.hypot(cp.x - this.ball.x, cp.z - this.ball.z);
+            if (d < minCpuDist) { minCpuDist = d; closestCpu = cp; }
+          });
+
+          if (p === closestCpu && !userHasPriority) {
+            const dx = this.ball.x - p.x;
+            const dz = this.ball.z - p.z;
+            const len = Math.hypot(dx, dz);
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+            aiInput.sprint = false;
+          } else {
+            // Mantiene la posizione difensiva di reparto
+            const targetX = p.baseX + (this.ball.x * 0.25);
+            const targetZ = p.baseZ + (this.ball.z * 0.2);
+            const dx = targetX - p.x;
+            const dz = targetZ - p.z;
+            const len = Math.hypot(dx, dz);
+            if (len > 1.2) {
+              aiInput.moveX = dx / len;
+              aiInput.moveZ = dz / len;
+            }
+          }
+        }
+      }
+    }
+    // ============================================
+    // 3. LA SQUADRA AVVERSARIA HA LA PALLA (Fase Difensiva)
+    // ============================================
+    else {
+      const holder = this.ball.holder;
+
+      if (isUserTeam) {
+        // Compagni di squadra dell'utente in difesa
+        if (p.role === 'gk') {
+          const idealX = ownGoalX + (p.team === 1 ? 5 : -5);
+          const idealZ = Math.max(-this.GOAL_W / 2 + 1, Math.min(this.GOAL_W / 2 - 1, this.ball.z * 0.6));
           const dx = idealX - p.x;
           const dz = idealZ - p.z;
           const len = Math.hypot(dx, dz);
@@ -899,32 +1025,77 @@ export class FootballGame {
             aiInput.moveX = dx / len;
             aiInput.moveZ = dz / len;
           }
-        }
-      } else {
-        // Attaccante / Mediano
-        // Se la palla è libera o avversaria ed è il compagno più vicino, va ad aggredirla
-        const teamHasBall = team.some(tm => tm === this.ball.holder);
-
-        if (!teamHasBall && distToBall < 18) {
-          const dx = this.ball.x - p.x;
-          const dz = this.ball.z - p.z;
-          const len = Math.hypot(dx, dz);
-          aiInput.moveX = dx / len;
-          aiInput.moveZ = dz / len;
-          aiInput.sprint = distToBall > 6;
-
-          // Se avversario in possesso a portata, scivolata
-          if (this.ball.holder && this.ball.holder.team !== p.team && distToBall < 2.5 && Math.random() < 0.08) {
-            aiInput.slideTrigger = true;
-          }
         } else {
-          // Posizionamento tattico: supporto all'attacco o copertura
-          const targetX = p.baseX + (this.ball.x * 0.35);
+          // Copertura a zona
+          const targetX = p.baseX + (this.ball.x * 0.3);
           const targetZ = p.baseZ + (this.ball.z * 0.25);
           const dx = targetX - p.x;
           const dz = targetZ - p.z;
           const len = Math.hypot(dx, dz);
           if (len > 1.2) {
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+          }
+        }
+      } else {
+        // CPU DIFENDE CONTRO L'UTENTE (Passiva, mai soffocante, nessun raddoppio cieco):
+        // 1. Trova il SINGOLO difensore CPU più vicino al portatore di palla
+        let closestDefender = myTeam[0];
+        let minDefDist = 9999;
+        myTeam.forEach(cp => {
+          if (cp.role !== 'gk') {
+            const d = Math.hypot(cp.x - holder.x, cp.z - holder.z);
+            if (d < minDefDist) { minDefDist = d; closestDefender = cp; }
+          }
+        });
+
+        if (p === closestDefender) {
+          // DIFENSORE PRIMARIO (Marcatura a distanza / Containment):
+          // Si posiziona a circa 3.2 metri davanti al giocatore, chiudendogli la linea verso la porta
+          // senza mai caricare furiosamente né scivolare a vuoto
+          const containDist = 3.2;
+          const goalDirX = (ownGoalX - holder.x);
+          const goalDirZ = (0 - holder.z);
+          const goalLen = Math.hypot(goalDirX, goalDirZ) || 1;
+
+          const idealX = holder.x + (goalDirX / goalLen) * containDist;
+          const idealZ = holder.z + (goalDirZ / goalLen) * containDist;
+
+          const dx = idealX - p.x;
+          const dz = idealZ - p.z;
+          const len = Math.hypot(dx, dz);
+
+          if (len > 0.8) {
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+          }
+          aiInput.sprint = false; // NON scatta: l'utente può dribblarlo con facilità!
+
+          // Contrasto CPU: SOLO se l'utente va direttamente addosso al difensore (< 1.1m)
+          // e trattiene la palla fermo da oltre 2 secondi
+          if (distToBall < 1.1 && holder.possessionTime > 2.0 && p.tackleCooldown <= 0 && Math.random() < 0.015) {
+            aiInput.slideTrigger = true;
+            p.tackleCooldown = 3.5; // 3.5 secondi di pausa prima di poter riprovare!
+          }
+        } else if (p.role === 'gk') {
+          // Portiere CPU: difende la linea
+          const idealX = ownGoalX + (p.team === 1 ? 5 : -5);
+          const idealZ = Math.max(-this.GOAL_W / 2 + 1, Math.min(this.GOAL_W / 2 - 1, this.ball.z * 0.55));
+          const dx = idealX - p.x;
+          const dz = idealZ - p.z;
+          const len = Math.hypot(dx, dz);
+          if (len > 0.8) {
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+          }
+        } else {
+          // Gli altri difensori CPU mantengono la posizione di zona, NIENTE sciami né raddoppi
+          const targetX = p.baseX + (this.ball.x * 0.2);
+          const targetZ = p.baseZ + (this.ball.z * 0.15);
+          const dx = targetX - p.x;
+          const dz = targetZ - p.z;
+          const len = Math.hypot(dx, dz);
+          if (len > 1.0) {
             aiInput.moveX = dx / len;
             aiInput.moveZ = dz / len;
           }
