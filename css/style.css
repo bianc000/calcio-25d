@@ -389,20 +389,23 @@ h1, h2, h3 {
   flex-direction: column;
   justify-content: space-between;
   padding: 16px;
+  z-index: 30;
+  pointer-events: none;
 }
 
 /* Scoreboard Centrale */
 .top-scoreboard {
   align-self: center;
-  background: rgba(13, 20, 31, 0.88);
-  border: 2px solid rgba(0, 240, 255, 0.35);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  border-radius: 12px;
+  background: rgba(10, 16, 26, 0.94);
+  border: 2px solid rgba(0, 240, 255, 0.45);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7), 0 0 15px rgba(0, 240, 255, 0.2);
+  border-radius: 14px;
   display: flex;
   align-items: center;
-  padding: 6px 20px;
-  gap: 22px;
-  backdrop-filter: blur(8px);
+  padding: 8px 24px;
+  gap: 18px;
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
 }
 
 .team-badge {
@@ -420,27 +423,50 @@ h1, h2, h3 {
 
 .team-name {
   font-family: 'Teko', sans-serif;
-  font-size: 1.8rem;
+  font-size: 2rem;
   letter-spacing: 1px;
 }
 
 .score-display {
   font-family: 'Teko', sans-serif;
-  font-size: 3rem;
+  font-size: 3.4rem;
   color: #ffffff;
   padding: 0 10px;
-  letter-spacing: 3px;
+  letter-spacing: 4px;
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
 }
 
 .match-clock {
   font-family: 'Rajdhani', sans-serif;
   font-weight: 700;
-  font-size: 1.4rem;
+  font-size: 1.5rem;
   color: #ffd700;
-  background: #091017;
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid #233446;
+  background: #08111a;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #2e4a68;
+  letter-spacing: 1px;
+}
+
+.btn-pause-hud {
+  background: #18283a;
+  border: 1px solid #2e4a68;
+  color: #00f0ff;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.4rem;
+  padding: 4px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.2s ease;
+  pointer-events: auto;
+}
+
+.btn-pause-hud:hover {
+  background: var(--primary);
+  color: #041018;
+  box-shadow: 0 0 15px var(--primary);
+  transform: scale(1.05);
 }
 
 /* Barra Potenza Tiro */

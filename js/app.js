@@ -43,6 +43,11 @@ class App {
     this.radarCanvas = document.getElementById('radar-canvas');
     this.radarCtx = this.radarCanvas ? this.radarCanvas.getContext('2d') : null;
 
+    this.pauseModal = document.getElementById('pause-modal');
+    this.pauseScore1 = document.getElementById('pause-score-t1');
+    this.pauseScore2 = document.getElementById('pause-score-t2');
+    this.pauseClock = document.getElementById('pause-clock');
+
     this.toastEl = document.getElementById('toast');
     this.soundToggleBtn = document.getElementById('sound-toggle');
   }
@@ -98,6 +103,26 @@ class App {
       this.startMatch();
     };
     document.getElementById('btn-menu-exit').onclick = () => {
+      sounds.playBeep();
+      location.reload();
+    };
+
+    // Pausa
+    const btnPauseToggle = document.getElementById('btn-pause-toggle');
+    if (btnPauseToggle) btnPauseToggle.onclick = () => this.togglePause();
+
+    const btnResume = document.getElementById('btn-resume-game');
+    if (btnResume) btnResume.onclick = () => this.togglePause();
+
+    const btnRestart = document.getElementById('btn-restart-game');
+    if (btnRestart) btnRestart.onclick = () => {
+      sounds.playBeep();
+      if (this.pauseModal) this.pauseModal.classList.add('hidden');
+      this.startMatch();
+    };
+
+    const btnPauseMenu = document.getElementById('btn-pause-menu');
+    if (btnPauseMenu) btnPauseMenu.onclick = () => {
       sounds.playBeep();
       location.reload();
     };
@@ -486,6 +511,7 @@ class App {
       isHost: this.isHost,
       isClient: (this.gameMode === 'online' && !this.isHost),
       networkManager: this.net,
+      onTogglePause: () => this.togglePause(),
       onGoal: (team, score) => this.handleGoal(team, score),
       onMatchEnd: (score) => this.handleMatchEnd(score),
       onUpdateHUD: (hudData) => this.updateHUD(hudData)
@@ -530,6 +556,23 @@ class App {
     } else {
       resultTitle.innerText = "PAREGGIO COMBATTUTO!";
       resultTitle.style.color = "#ffd700";
+    }
+  }
+
+  togglePause() {
+    if (!this.game) return;
+    const isPaused = this.game.togglePause();
+    if (isPaused) {
+      sounds.playBeep(480, 0.08);
+      if (this.pauseScore1) this.pauseScore1.innerText = this.game.score[0];
+      if (this.pauseScore2) this.pauseScore2.innerText = this.game.score[1];
+      const mins = Math.floor(this.game.matchTime / 60);
+      const secs = (this.game.matchTime % 60).toString().padStart(2, '0');
+      if (this.pauseClock) this.pauseClock.innerText = `${mins}:${secs}`;
+      if (this.pauseModal) this.pauseModal.classList.remove('hidden');
+    } else {
+      sounds.playBeep(650, 0.06);
+      if (this.pauseModal) this.pauseModal.classList.add('hidden');
     }
   }
 

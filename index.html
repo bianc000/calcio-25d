@@ -140,6 +140,7 @@
         <p>👟 <strong>Passaggio Filtrante:</strong> Tasto <strong>Z</strong> o <strong>J</strong></p>
         <p>🛡️ <strong>Scivolata Difensiva:</strong> Tasto <strong>X</strong> o <strong>K</strong> quando non hai palla</p>
         <p>🔄 <strong>Cambia Giocatore:</strong> <strong>SPAZIO</strong> o <strong>Q</strong> (seleziona il compagno più vicino alla palla)</p>
+        <p>⏸️ <strong>Pausa Partita:</strong> Tasto <strong>ESC</strong> o <strong>P</strong></p>
         <p>📱 <strong>Mobile / Tablet:</strong> Joystick virtuale e pulsanti touch su schermo</p>
       </div>
 
@@ -172,6 +173,8 @@
       </div>
 
       <div id="match-clock" class="match-clock">3:00</div>
+
+      <button id="btn-pause-toggle" class="btn-pause-hud" title="Pausa (ESC)">⏸️ PAUSA</button>
     </div>
 
     <!-- Barra Caricamento Tiro -->
@@ -207,6 +210,36 @@
 
   <!-- Banner Animato GOOOOL! -->
   <div id="goal-banner">GOOOOL!</div>
+
+  <!-- MODALE PAUSA -->
+  <div id="pause-modal" class="modal-screen hidden interactive">
+    <div class="menu-box">
+      <h2 style="font-size: 3.2rem; color: #ffd700;">PARTITA IN PAUSA</h2>
+      <div class="subtitle">MSoccer Arcade</div>
+
+      <div style="background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 215, 0, 0.3); border-radius: 12px; padding: 18px; margin: 20px 0;">
+        <div style="font-size: 1.1rem; color: #94a3b8; letter-spacing: 2px;">RISULTATO ATTUALE</div>
+        <div style="font-family: 'Teko', sans-serif; font-size: 4.5rem; color: #fff; line-height: 1; margin: 6px 0;">
+          <span id="pause-score-t1" style="color: #e74c3c;">0</span> - <span id="pause-score-t2" style="color: #2980b9;">0</span>
+        </div>
+        <div style="font-size: 1.3rem; color: #ffd700; font-weight: 700;">
+          ⏱️ Tempo Rimanente: <span id="pause-clock">3:00</span>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-resume-game" class="btn btn-primary" style="font-size: 2rem;">
+          <span>▶</span> Riprendi Partita (ESC)
+        </button>
+        <button id="btn-restart-game" class="btn" style="font-size: 1.6rem;">
+          <span>🔄</span> Riavvia Partita
+        </button>
+        <button id="btn-pause-menu" class="btn btn-secondary" style="font-size: 1.4rem;">
+          <span>🏠</span> Torna al Menu Principale
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- 6. MODALE FINE PARTITA / VITTORIA -->
   <div id="game-over-modal" class="modal-screen hidden interactive">

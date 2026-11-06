@@ -53,6 +53,7 @@ Prima di ogni match, ogni squadra sceglie 3 campioni tra i 12 disponibili:
 - **Passaggio:** Tasto `Z` o `J` (passaggio rasoterra o filtrante al compagno)
 - **Scivolata / Contrasto:** Tasto `X` o `K` (quando non si ha il possesso palla)
 - **Cambio Giocatore:** `Barra Spaziatrice` o `Q` (seleziona all'istante il compagno più vicino alla palla)
+- **Pausa Partita:** Tasto `ESC` o `P` (o pulsante ⏸️ PAUSA sulla barra superiore)
 
 ### Su Dispositivi Mobili (Smartphone / Tablet)
 - **Joystick analogico a sinistra:** Guida il giocatore

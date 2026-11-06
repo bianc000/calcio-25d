@@ -16,10 +16,11 @@ export class FootballGame {
 
     // Stato partita
     this.score = [0, 0];
-    this.matchTime = 180; // 3 minuti in secondi
+    this.matchTime = 180; // 3 minuti in secondi (180s)
     this.state = 'waiting'; // waiting, playing, goal, ended
     this.goalCelebrationTimer = 0;
     this.isSinglePlayer = options.isSinglePlayer !== false;
+    this.isPaused = false;
 
     // Squadre (3 personaggi per squadra)
     this.team1Ids = options.team1 || ['ento', 'lindi', 'bubi'];
@@ -75,9 +76,9 @@ export class FootballGame {
     this.scene.background = new window.THREE.Color(0x131e29);
     this.scene.fog = new window.THREE.FogExp2(0x131e29, 0.007);
 
-    // Camera 2.5D Isometrica / Broadcast
-    this.camera = new window.THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    this.camera.position.set(0, 48, 52);
+    // Camera 2.5D Più ampia e panoramica per una visuale tattica
+    this.camera = new window.THREE.PerspectiveCamera(46, width / height, 0.1, 1000);
+    this.camera.position.set(0, 52, 58);
     this.camera.lookAt(0, 0, 0);
 
     // Renderer
@@ -524,6 +525,15 @@ export class FootballGame {
     window.addEventListener('keydown', (e) => {
       this.keysDown[e.code] = true;
 
+      // Pausa (Escape o P)
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        if (this.options.onTogglePause) {
+          this.options.onTogglePause();
+          e.preventDefault();
+          return;
+        }
+      }
+
       // Switch giocatore (Barra Spaziatrice o Q)
       if (e.code === 'Space' || e.code === 'KeyQ') {
         this.input.switchTrigger = true;
@@ -618,6 +628,16 @@ export class FootballGame {
     sounds.playWhistle(false);
   }
 
+  // Gestione Pausa
+  togglePause() {
+    this.isPaused = !this.isPaused;
+    return this.isPaused;
+  }
+
+  setPause(paused) {
+    this.isPaused = paused;
+  }
+
   // Switch al compagno più vicino alla palla
   switchActivePlayer(teamNum) {
     const team = (teamNum === 1) ? this.playersTeam1 : this.playersTeam2;
@@ -681,10 +701,9 @@ export class FootballGame {
     if (p.protectionTimer > 0) p.protectionTimer -= dt;
     if (p.tackleCooldown > 0) p.tackleCooldown -= dt;
 
-    const baseSpeed = 13 + (stats.speed / 100) * 6; // 13 - 19 unità/sec
-    // Il giocatore umano ha uno sprint più scattante (1.45x) e pieno controllo (100% velocità)
-    // La CPU si muove a un passo più calmo e umano (82%), senza mai sovrastare l'utente
-    const speedMult = inputData.sprint ? (isHuman ? 1.45 : 1.15) : 1.0;
+    const baseSpeed = 8.5 + (stats.speed / 100) * 3.5; // Velocità calibrata e controllabile (8.5 - 12.0 unità/sec)
+    // Il giocatore umano ha uno sprint reattivo (1.35x), mentre la CPU mantiene un passo più rilassato (82%)
+    const speedMult = inputData.sprint ? (isHuman ? 1.35 : 1.1) : 1.0;
     const paceFactor = isHuman ? 1.0 : 0.82;
     const currentMaxSpeed = baseSpeed * speedMult * paceFactor;
 
@@ -778,7 +797,7 @@ export class FootballGame {
       p.possessionTime += dt;
 
       // La palla segue il giocatore davanti ai suoi piedi
-      const ballOffsetDist = 1.1 * p.scale;
+      const ballOffsetDist = 0.95 * p.scale;
       this.ball.x = p.x + Math.sin(p.rot) * ballOffsetDist;
       this.ball.z = p.z + Math.cos(p.rot) * ballOffsetDist;
       this.ball.y = this.ball.radius;
@@ -786,10 +805,15 @@ export class FootballGame {
       this.ball.vz = p.vz;
       this.ball.vy = 0;
 
+      // FONDAMENTALE: aggiorna istantaneamente la mesh Three.js e l'ombra!
+      this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
+      this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
+      this.ballShadow.scale.set(1.0, 1.0, 1);
+
       // Esegui tiro se rilasciato
       if (inputData.shootTrigger) {
         const shotPowerNorm = Math.max(0.35, inputData.shotPower || 0.7);
-        const powerMult = 22 + (stats.shot / 100) * 20; // 22 - 42 potenza
+        const powerMult = 18 + (stats.shot / 100) * 12; // 18 - 30 potenza (bilanciata e leggibile)
         const finalSpeed = shotPowerNorm * powerMult;
 
         // Direzione tiro verso porta avversaria con leggera influenza direzionale
@@ -802,7 +826,7 @@ export class FootballGame {
         this.ball.holder = null;
         this.ball.vx = Math.sin(shootAngle) * finalSpeed;
         this.ball.vz = Math.cos(shootAngle) * finalSpeed;
-        this.ball.vy = 4 + shotPowerNorm * 7; // parabola verso l'alto
+        this.ball.vy = 3.2 + shotPowerNorm * 5.2; // parabola pulita verso l'alto
 
         if (shotPowerNorm > 0.75) {
           sounds.playPowerShot();
@@ -815,7 +839,7 @@ export class FootballGame {
         const teammates = (p.team === 1) ? this.playersTeam1 : this.playersTeam2;
         const otherTeammates = teammates.filter(mate => mate !== p);
 
-        // Trova compagno migliore (più avanzato o in direzione levetta)
+        // Trova compagno migliore
         let bestTarget = otherTeammates[0];
         let bestScore = -9999;
 
@@ -823,7 +847,6 @@ export class FootballGame {
           const dx = mate.x - p.x;
           const dz = mate.z - p.z;
           const dist = Math.hypot(dx, dz);
-          // Bonus se verso la porta avversaria e non coperto
           const forwardBonus = (p.team === 1) ? (mate.x - p.x) * 1.5 : (p.x - mate.x) * 1.5;
           const score = forwardBonus - dist * 0.4;
           if (score > bestScore) {
@@ -835,12 +858,12 @@ export class FootballGame {
         const dx = bestTarget.x - p.x;
         const dz = bestTarget.z - p.z;
         const dist = Math.hypot(dx, dz);
-        const passSpeed = Math.min(32, Math.max(16, dist * 1.3));
+        const passSpeed = Math.min(22, Math.max(12, dist * 1.05));
 
         this.ball.holder = null;
         this.ball.vx = (dx / dist) * passSpeed;
         this.ball.vz = (dz / dist) * passSpeed;
-        this.ball.vy = 1.2;
+        this.ball.vy = 1.0;
 
         sounds.playKick(0.7);
       }
@@ -1108,18 +1131,24 @@ export class FootballGame {
 
   // Fisica vettoriale della palla (rimbalzi, pali, gol)
   updateBall(dt) {
-    if (this.ball.holder) return;
+    if (this.ball.holder) {
+      // FONDAMENTALE: aggiorna SEMPRE la mesh e l'ombra anche durante il possesso
+      this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
+      this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
+      this.ballShadow.scale.set(1.0, 1.0, 1);
+      return;
+    }
 
-    // Gravità
-    this.ball.vy -= 18.0 * dt;
+    // Gravità bilanciata
+    this.ball.vy -= 16.0 * dt;
 
     this.ball.x += this.ball.vx * dt;
     this.ball.y += this.ball.vy * dt;
     this.ball.z += this.ball.vz * dt;
 
-    // Attrito dell'erba e resistenza aria
-    this.ball.vx *= (1 - 0.55 * dt);
-    this.ball.vz *= (1 - 0.55 * dt);
+    // Attrito dell'erba e resistenza per rotolamento realistico e controllabile
+    this.ball.vx *= (1 - 0.75 * dt);
+    this.ball.vz *= (1 - 0.75 * dt);
 
     // Rimbalzo sul terreno
     if (this.ball.y <= this.ball.radius) {
@@ -1209,6 +1238,13 @@ export class FootballGame {
   // Loop Principale
   animate(time) {
     requestAnimationFrame(this.animate);
+
+    // Se in pausa, renderizza la scena ferma e non avanzare timer o logica
+    if (this.isPaused) {
+      this.renderer.render(this.scene, this.camera);
+      this.lastTime = time;
+      return;
+    }
 
     const dt = Math.min((time - this.lastTime) / 1000, 0.1);
     this.lastTime = time;
@@ -1300,12 +1336,12 @@ export class FootballGame {
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
     });
 
-    // 4. Telecamera dinamica 2.5D (insegue dolcemente la palla e l'azione)
-    const targetCamX = this.ball.x * 0.45;
-    const targetCamZ = this.ball.z * 0.35 + 46;
-    this.camera.position.x += (targetCamX - this.camera.position.x) * 4.0 * dt;
-    this.camera.position.z += (targetCamZ - this.camera.position.z) * 4.0 * dt;
-    this.camera.lookAt(this.ball.x * 0.45, 0, this.ball.z * 0.35);
+    // 4. Telecamera dinamica 2.5D (insegue dolcemente la palla con visuale panoramica chiara)
+    const targetCamX = this.ball.x * 0.35;
+    const targetCamZ = this.ball.z * 0.28 + 50;
+    this.camera.position.x += (targetCamX - this.camera.position.x) * 3.0 * dt;
+    this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.0 * dt;
+    this.camera.lookAt(this.ball.x * 0.35, 0, this.ball.z * 0.28);
 
     // 5. Render scena
     this.renderer.render(this.scene, this.camera);
@@ -1369,6 +1405,8 @@ export class FootballGame {
     this.ball.x = packet.ball.x;
     this.ball.y = packet.ball.y;
     this.ball.z = packet.ball.z;
+    this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
+    this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
 
     // Giocatori Squadra 1
     packet.t1.forEach((data, idx) => {
