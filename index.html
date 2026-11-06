@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Calcio 2.5D Multiplayer - 3v3 Arcade</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>">
+  
+  <!-- Three.js e PeerJS (CDN affidabili e veloci) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+  <!-- Contenitore Canvas 3D Three.js -->
+  <div id="game-canvas-container"></div>
+
+  <!-- Layer Notifiche Toast -->
+  <div id="toast">Notifica</div>
+
+  <!-- Pulsante Audio Globale -->
+  <button id="sound-toggle" class="sound-toggle-btn interactive">🔊 Audio Attivo</button>
+
+  <!-- 1. MENU PRINCIPALE -->
+  <div id="main-menu" class="modal-screen interactive">
+    <div class="menu-box">
+      <h1 class="title-glow">CALCIO 2.5D</h1>
+      <div class="subtitle">Multiplayer Arcade 3 Contro 3</div>
+
+      <div class="btn-group">
+        <button id="btn-play-cpu" class="btn btn-primary">
+          <span>⚽</span> Partita vs CPU
+        </button>
+        <button id="btn-play-online" class="btn btn-accent">
+          <span>🌐</span> Gioca Online con Amici
+        </button>
+        <button id="btn-rules" class="btn">
+          <span>📖</span> Comandi e Regole
+        </button>
+      </div>
+
+      <p style="margin-top: 25px; font-size: 0.95rem; color: #64748b;">
+        12 Personaggi Unici • Fisica 3D • WebRTC Peer-to-Peer
+      </p>
+    </div>
+  </div>
+
+  <!-- 2. MODALE MULTIPLAYER ONLINE -->
+  <div id="online-modal" class="modal-screen hidden interactive">
+    <div class="menu-box">
+      <h2 style="font-size: 2.8rem; color: var(--primary);">STANZA MULTIPLAYER</h2>
+      <div class="subtitle">Sfida un amico da qualsiasi dispositivo</div>
+
+      <div class="lobby-inputs">
+        <button id="btn-create-room" class="btn btn-primary">
+          <span>👑</span> Crea Nuova Partita (Host)
+        </button>
+
+        <div id="host-waiting-box" style="display: none; margin-top: 15px;">
+          <p style="color: #cbd5e1; font-size: 1.1rem; margin-bottom: 8px;">Codice Stanza:</p>
+          <div id="host-room-code" class="room-input" style="font-size: 2.2rem; color: #ffd700;">---</div>
+          <p style="margin: 10px 0; font-size: 0.9rem; color: #94a3b8;">Link diretto per il tuo amico:</p>
+          <div id="room-share-url" class="room-share-badge">Generazione link...</div>
+          <button id="btn-copy-link" class="btn btn-secondary" style="margin-top: 10px; width: 100%;">
+            📋 Copia Link Partita
+          </button>
+          <p style="color: #00f0ff; margin-top: 12px; font-size: 1rem; animation: pulse 1.5s infinite;">
+            In attesa che l'amico si connetta...
+          </p>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; margin: 15px 0;">
+          <div style="flex: 1; height: 1px; background: #2c4257;"></div>
+          <span style="color: #64748b; font-weight: 700;">OPPURE</span>
+          <div style="flex: 1; height: 1px; background: #2c4257;"></div>
+        </div>
+
+        <p style="color: #cbd5e1; font-size: 1.1rem;">Entra con un codice esistente:</p>
+        <input type="text" id="join-room-input" class="room-input" placeholder="ES: CALCIO-X7K2" maxlength="16">
+        <button id="btn-join-room" class="btn btn-accent">
+          <span>🚀</span> Unisciti alla Partita
+        </button>
+      </div>
+
+      <button id="btn-back-menu" class="btn btn-secondary" style="margin-top: 15px;">
+        ⬅ Torna al Menu
+      </button>
+    </div>
+  </div>
+
+  <!-- 3. SCHERMATA DRAFT / SELEZIONE 12 PERSONAGGI -->
+  <div id="draft-screen" class="modal-screen character-select-screen hidden interactive">
+    <div class="draft-header">
+      <h2 style="font-size: 3rem; color: #fff;">SCEGLI I TUOI CAMPIONI (3v3)</h2>
+      <p style="color: var(--primary); font-size: 1.1rem; text-transform: uppercase;">
+        Clicca su 3 personaggi per comporre la tua formazione
+      </p>
+    </div>
+
+    <!-- Slot Squadre -->
+    <div class="team-draft-slots">
+      <div class="draft-team-card team-1">
+        <h3 style="color: #e74c3c; font-size: 1.8rem;">SQUADRA 1 (ROSSI)</h3>
+        <div class="picked-slots">
+          <div id="slot-t1-0" class="slot-item">Giocatore 1</div>
+          <div id="slot-t1-1" class="slot-item">Giocatore 2</div>
+          <div id="slot-t1-2" class="slot-item">Giocatore 3</div>
+        </div>
+      </div>
+      <div class="draft-team-card team-2">
+        <h3 style="color: #2980b9; font-size: 1.8rem;">SQUADRA 2 (BLU)</h3>
+        <div class="picked-slots">
+          <div id="slot-t2-0" class="slot-item">Giocatore 1</div>
+          <div id="slot-t2-1" class="slot-item">Giocatore 2</div>
+          <div id="slot-t2-2" class="slot-item">Giocatore 3</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Griglia dei 12 Personaggi -->
+    <div id="characters-grid" class="characters-grid">
+      <!-- Generata via JS con Ento, Lindi, Matti, Bubi, Lollo, Ara, Roby, Pibe, Jelmo, Jona, Kri, Leon -->
+    </div>
+
+    <button id="btn-start-match" class="btn btn-primary" style="font-size: 2.2rem; padding: 12px 60px;">
+      ⚡ FISCHIO D'INIZIO!
+    </button>
+  </div>
+
+  <!-- 4. MODALE COMANDI E REGOLE -->
+  <div id="rules-modal" class="modal-screen hidden interactive">
+    <div class="menu-box" style="text-align: left; max-width: 600px;">
+      <h2 style="font-size: 2.6rem; color: var(--primary); text-align: center;">COMANDI DI GIOCO</h2>
+      
+      <div style="font-size: 1.1rem; line-height: 1.6; margin: 15px 0;">
+        <p>🏃 <strong>Movimento:</strong> Tasti Freccia oppure <strong>W, A, S, D</strong></p>
+        <p>⚡ <strong>Scatto Sprint:</strong> Tieni premuto <strong>SHIFT</strong></p>
+        <p>⚽ <strong>Tiro in Porta:</strong> Tasto <strong>X</strong> o <strong>K</strong> (tieni premuto per caricare la potenza!)</p>
+        <p>👟 <strong>Passaggio Filtrante:</strong> Tasto <strong>Z</strong> o <strong>J</strong></p>
+        <p>🛡️ <strong>Scivolata Difensiva:</strong> Tasto <strong>X</strong> o <strong>K</strong> quando non hai palla</p>
+        <p>🔄 <strong>Cambia Giocatore:</strong> <strong>SPAZIO</strong> o <strong>Q</strong> (seleziona il compagno più vicino alla palla)</p>
+        <p>📱 <strong>Mobile / Tablet:</strong> Joystick virtuale e pulsanti touch su schermo</p>
+      </div>
+
+      <div style="background: rgba(0, 240, 255, 0.1); border-left: 4px solid var(--primary); padding: 10px; margin: 15px 0;">
+        <strong>Regole:</strong> Partite 3 contro 3 della durata di 3 minuti. Chi segna più gol vince la sfida!
+      </div>
+
+      <button id="btn-close-rules" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
+        HO CAPITO, VAI AL GIOCO!
+      </button>
+    </div>
+  </div>
+
+  <!-- 5. IN-GAME HUD -->
+  <div id="in-game-hud" style="display: none;">
+    <!-- Scoreboard Superiore -->
+    <div class="top-scoreboard">
+      <div class="team-badge">
+        <div class="team-color-dot" style="background: #e74c3c; color: #e74c3c;"></div>
+        <span class="team-name" style="color: #e74c3c;">ROSSI</span>
+      </div>
+
+      <div class="score-display">
+        <span id="score-t1">0</span> - <span id="score-t2">0</span>
+      </div>
+
+      <div class="team-badge">
+        <span class="team-name" style="color: #2980b9;">BLU</span>
+        <div class="team-color-dot" style="background: #2980b9; color: #2980b9;"></div>
+      </div>
+
+      <div id="match-clock" class="match-clock">3:00</div>
+    </div>
+
+    <!-- Barra Caricamento Tiro -->
+    <div id="shot-power-container" class="shot-power-container">
+      <div id="shot-power-bar" class="shot-power-bar"></div>
+    </div>
+
+    <!-- Minimappa Radar -->
+    <div class="radar-container">
+      <canvas id="radar-canvas" width="180" height="110"></canvas>
+    </div>
+
+    <!-- Quick Emotes Interattive -->
+    <div class="quick-emotes interactive">
+      <button class="emote-btn">⚽ Che Gol!</button>
+      <button class="emote-btn">👏 Bravo!</button>
+      <button class="emote-btn">🧤 Paratona!</button>
+      <button class="emote-btn">🔥 Andiamo!</button>
+    </div>
+
+    <!-- Controlli Touch per Dispositivi Mobili -->
+    <div class="touch-controls">
+      <div id="touch-stick" class="touch-stick-zone">
+        <div id="touch-knob" class="touch-stick-knob"></div>
+      </div>
+      <div class="touch-btn-group">
+        <div id="touch-pass" class="touch-btn" style="border-color: #ffd700;">PASS</div>
+        <div id="touch-shoot" class="touch-btn" style="border-color: #ff0055;">TIRO</div>
+        <div id="touch-switch" class="touch-btn" style="border-color: #00f0ff;">CAMBIA</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Banner Animato GOOOOL! -->
+  <div id="goal-banner">GOOOOL!</div>
+
+  <!-- 6. MODALE FINE PARTITA / VITTORIA -->
+  <div id="game-over-modal" class="modal-screen hidden interactive">
+    <div class="menu-box">
+      <h1 id="game-over-title" class="title-glow" style="font-size: 3.5rem;">TRIPLICE FISCHIO!</h1>
+      <div class="subtitle">Risultato Finale</div>
+      <div id="final-score" style="font-family: 'Teko', sans-serif; font-size: 5rem; color: #fff; margin: 15px 0;">
+        0 - 0
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-rematch" class="btn btn-primary">
+          <span>🔄</span> Rivincita Subito!
+        </button>
+        <button id="btn-menu-exit" class="btn btn-secondary">
+          <span>🏠</span> Torna al Menu Principale
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script Principale (ES Module) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

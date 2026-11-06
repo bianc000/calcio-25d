@@ -1,0 +1,640 @@
+@import url('https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Rajdhani:wght@600;700&family=Inter:wght@400;600;800&display=swap');
+
+:root {
+  --primary: #00f0ff;
+  --primary-dark: #0099b8;
+  --accent: #ff0055;
+  --gold: #ffd700;
+  --team1: #e74c3c;
+  --team2: #2980b9;
+  --bg-dark: #0b1118;
+  --panel-bg: rgba(15, 23, 35, 0.92);
+  --text: #ffffff;
+  --text-muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body, html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-dark);
+  font-family: 'Rajdhani', sans-serif;
+  color: var(--text);
+}
+
+#game-canvas-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* UI Overlay Layer */
+#ui-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.interactive {
+  pointer-events: auto;
+}
+
+/* Titoli & Tipografia */
+h1, h2, h3 {
+  font-family: 'Teko', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+/* Schermate Modali */
+.modal-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle at center, rgba(16, 28, 48, 0.94) 0%, rgba(7, 12, 20, 0.98) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
+  padding: 20px;
+  opacity: 1;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.modal-screen.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Menu Principale */
+.menu-box {
+  background: var(--panel-bg);
+  border: 2px solid rgba(0, 240, 255, 0.3);
+  box-shadow: 0 0 35px rgba(0, 240, 255, 0.2), inset 0 0 20px rgba(0, 0, 0, 0.6);
+  border-radius: 16px;
+  padding: 35px 45px;
+  max-width: 650px;
+  width: 90%;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+.title-glow {
+  font-size: 4rem;
+  line-height: 0.9;
+  color: #fff;
+  text-shadow: 0 0 20px var(--primary), 0 0 40px var(--primary-dark);
+  margin-bottom: 5px;
+}
+
+.subtitle {
+  font-size: 1.25rem;
+  color: var(--primary);
+  margin-bottom: 25px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.btn {
+  background: linear-gradient(135deg, #1f2d3d 0%, #141f2c 100%);
+  border: 2px solid #2d4156;
+  color: #fff;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.8rem;
+  padding: 10px 24px;
+  border-radius: 10px;
+  cursor: pointer;
+  letter-spacing: 1.5px;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  border-color: var(--primary);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #00d2ff 0%, #0077ff 100%);
+  border-color: #00f0ff;
+  color: #05101a;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(255,255,255,0.4);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.6);
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, #ff0055 0%, #a80038 100%);
+  border-color: #ff3377;
+}
+
+.btn-accent:hover {
+  box-shadow: 0 0 25px rgba(255, 0, 85, 0.6);
+}
+
+.btn-secondary {
+  font-size: 1.3rem;
+  padding: 6px 16px;
+  background: #192535;
+}
+
+/* Modale Online Lobby */
+.lobby-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin: 20px 0;
+}
+
+.room-input {
+  background: #0f1822;
+  border: 2px solid #2c4257;
+  color: #00f0ff;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 12px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+}
+
+.room-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+}
+
+.room-share-badge {
+  background: #09121a;
+  border: 1px dashed var(--primary);
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  color: #7df6ff;
+  word-break: break-all;
+}
+
+/* Schermata Selezione Personaggi */
+.character-select-screen {
+  overflow-y: auto;
+  max-height: 98vh;
+  justify-content: flex-start;
+  padding-top: 25px;
+}
+
+.draft-header {
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+.team-draft-slots {
+  display: flex;
+  gap: 30px;
+  justify-content: center;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 900px;
+}
+
+.draft-team-card {
+  flex: 1;
+  background: rgba(18, 27, 41, 0.85);
+  border-radius: 12px;
+  padding: 14px 18px;
+  border-top: 4px solid var(--primary);
+}
+
+.draft-team-card.team-1 { border-top-color: var(--team1); }
+.draft-team-card.team-2 { border-top-color: var(--team2); }
+
+.picked-slots {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.slot-item {
+  flex: 1;
+  height: 52px;
+  background: #0b141f;
+  border: 1px dashed #3a5169;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.3rem;
+  color: #8fa3b8;
+}
+
+.slot-item.filled {
+  background: #172a3d;
+  border: 1px solid var(--primary);
+  color: #ffffff;
+}
+
+/* Griglia 12 Personaggi */
+.characters-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  max-width: 1000px;
+  width: 100%;
+  margin-bottom: 25px;
+}
+
+.char-card {
+  background: #131e2c;
+  border: 2px solid #25374a;
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.char-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--primary);
+  box-shadow: 0 4px 15px rgba(0, 240, 255, 0.3);
+}
+
+.char-card.selected-t1 {
+  border-color: var(--team1);
+  box-shadow: 0 0 15px rgba(231, 76, 60, 0.6);
+  background: #251618;
+}
+
+.char-card.selected-t2 {
+  border-color: var(--team2);
+  box-shadow: 0 0 15px rgba(41, 128, 185, 0.6);
+  background: #142232;
+}
+
+.char-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.char-name {
+  font-family: 'Teko', sans-serif;
+  font-size: 1.6rem;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.char-nick {
+  font-size: 0.75rem;
+  color: var(--primary);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.char-desc {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-bottom: 8px;
+  line-height: 1.2;
+  height: 32px;
+}
+
+.stat-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.stat-label {
+  width: 45px;
+}
+
+.stat-track {
+  flex: 1;
+  height: 6px;
+  background: #0c141d;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 0 6px;
+}
+
+.stat-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #00f0ff, #0077ff);
+}
+
+.stat-val {
+  width: 22px;
+  text-align: right;
+  color: #fff;
+}
+
+/* In-Game HUD */
+#in-game-hud {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+}
+
+/* Scoreboard Centrale */
+.top-scoreboard {
+  align-self: center;
+  background: rgba(13, 20, 31, 0.88);
+  border: 2px solid rgba(0, 240, 255, 0.35);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  padding: 6px 20px;
+  gap: 22px;
+  backdrop-filter: blur(8px);
+}
+
+.team-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.team-color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 0 10px currentColor;
+}
+
+.team-name {
+  font-family: 'Teko', sans-serif;
+  font-size: 1.8rem;
+  letter-spacing: 1px;
+}
+
+.score-display {
+  font-family: 'Teko', sans-serif;
+  font-size: 3rem;
+  color: #ffffff;
+  padding: 0 10px;
+  letter-spacing: 3px;
+}
+
+.match-clock {
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: #ffd700;
+  background: #091017;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #233446;
+}
+
+/* Barra Potenza Tiro */
+.shot-power-container {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 16px;
+  background: rgba(10, 16, 25, 0.85);
+  border: 2px solid #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  display: none;
+}
+
+.shot-power-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #ffd700, #ff0055);
+  transition: width 0.05s linear;
+}
+
+/* Minimappa Radar */
+.radar-container {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 180px;
+  height: 110px;
+  background: rgba(10, 20, 15, 0.75);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+
+#radar-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* Goal Banner Animato */
+#goal-banner {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.5);
+  font-family: 'Teko', sans-serif;
+  font-size: 7rem;
+  color: #ffd700;
+  text-shadow: 0 0 40px #ffaa00, 0 0 80px #ff0055, 0 4px 10px #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 100;
+  letter-spacing: 5px;
+}
+
+#goal-banner.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+/* Quick Emote Bar */
+.quick-emotes {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  display: flex;
+  gap: 8px;
+}
+
+.emote-btn {
+  background: rgba(15, 24, 38, 0.8);
+  border: 1px solid #2e445b;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.emote-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+  background: #1a293d;
+}
+
+/* Touch Controls per Smartphone */
+.touch-controls {
+  display: none;
+  position: absolute;
+  bottom: 25px;
+  width: 100%;
+  padding: 0 30px;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.touch-stick-zone {
+  width: 120px;
+  height: 120px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  position: relative;
+  pointer-events: auto;
+}
+
+.touch-stick-knob {
+  width: 50px;
+  height: 50px;
+  background: var(--primary);
+  border-radius: 50%;
+  position: absolute;
+  top: 35px;
+  left: 35px;
+  box-shadow: 0 0 15px var(--primary);
+}
+
+.touch-btn-group {
+  display: flex;
+  gap: 15px;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 65px;
+  height: 65px;
+  border-radius: 50%;
+  background: rgba(20, 32, 48, 0.9);
+  border: 2px solid var(--primary);
+  color: #fff;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+@media (pointer: coarse) {
+  .touch-controls {
+    display: flex;
+  }
+}
+
+/* Pulsante Audio Mute */
+.sound-toggle-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(14, 23, 35, 0.85);
+  border: 1px solid #2c4257;
+  color: #fff;
+  font-size: 1.2rem;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Toast Notifiche */
+#toast {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #00d2ff;
+  color: #03111b;
+  font-weight: 700;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.5);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 200;
+}
+
+#toast.show {
+  opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .characters-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .title-glow {
+    font-size: 2.8rem;
+  }
+  .team-draft-slots {
+    flex-direction: column;
+    gap: 10px;
+  }
+}
