@@ -1,4 +1,4 @@
-# ⚽ Calcio 2.5D Multiplayer (3v3 Arcade)
+# ⚽ MSoccer (Calcio 2.5D Multiplayer 3v3)
 
 Un gioco di calcio in stile arcade 2.5D in tempo reale con grafica Three.js e multiplayer online Peer-to-Peer (WebRTC tramite PeerJS). Sfida un tuo amico direttamente dal browser, senza installare nulla e senza server proprietari!
 

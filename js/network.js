@@ -12,7 +12,7 @@ export class NetworkManager {
   // Genera un ID stanza corto e amichevole
   generateRoomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = 'CALCIO-';
+    let code = 'MS-';
     for (let i = 0; i < 4; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
