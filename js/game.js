@@ -320,6 +320,59 @@ export class FootballGame {
     };
   }
 
+  createNameTag(name, teamColor) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    // Sfondo badge a capsula arrotondata (scuro semitrasparente ad alto contrasto)
+    const x = 12, y = 8, w = 232, h = 48, r = 24;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(8, 16, 28, 0.88)';
+    ctx.fill();
+
+    // Bordo identificativo con colore della squadra
+    const isTeam1 = (teamColor === 0xe74c3c);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = isTeam1 ? '#ff3838' : '#00f0ff';
+    ctx.stroke();
+
+    // Pallino squadra a sinistra
+    ctx.beginPath();
+    ctx.arc(38, 32, 8, 0, Math.PI * 2);
+    ctx.fillStyle = isTeam1 ? '#ff3838' : '#00f0ff';
+    ctx.fill();
+
+    // Nome del giocatore in grassetto ad alta visibilità
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 30px "Rajdhani", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name.toUpperCase(), 142, 33);
+
+    const texture = new window.THREE.CanvasTexture(canvas);
+    texture.minFilter = window.THREE.LinearFilter;
+    const spriteMat = new window.THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false
+    });
+    const sprite = new window.THREE.Sprite(spriteMat);
+    sprite.renderOrder = 999;
+    return sprite;
+  }
+
   createPlayerMesh(charData, teamColor, isCaptain = false) {
     const root = new window.THREE.Group();
     const scale = charData.height || 1.0;
@@ -422,7 +475,13 @@ export class FootballGame {
     arrow.position.set(0, 0.05, 1.5 * scale);
     root.add(arrow);
 
-    return { root, ring, ringMat, arrow, arrowMat, scale };
+    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa
+    const nameTag = this.createNameTag(charData.name, teamColor);
+    nameTag.position.set(0, 3.1 * scale, 0);
+    nameTag.scale.set(3.4, 0.85, 1);
+    root.add(nameTag);
+
+    return { root, ring, ringMat, arrow, arrowMat, nameTag, scale };
   }
 
   spawnPlayers() {
@@ -458,6 +517,7 @@ export class FootballGame {
         index: idx,
         role: posTeam1[idx].role,
         mesh: meshData.root,
+        nameTag: meshData.nameTag,
         ringMat: meshData.ringMat,
         arrowMat: meshData.arrowMat,
         x: posTeam1[idx].x,
@@ -493,6 +553,7 @@ export class FootballGame {
         index: idx,
         role: posTeam2[idx].role,
         mesh: meshData.root,
+        nameTag: meshData.nameTag,
         ringMat: meshData.ringMat,
         arrowMat: meshData.arrowMat,
         x: posTeam2[idx].x,
@@ -1408,12 +1469,17 @@ export class FootballGame {
       }
     }
 
-    // 3. Indicatori visivi di selezione
+    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa
     const activeIdx1 = this.activePlayerIdx1;
     this.playersTeam1.forEach((p, idx) => {
       const isActive = (idx === activeIdx1);
       p.ringMat.opacity = isActive ? 0.85 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
+      if (p.nameTag) {
+        const sX = isActive ? 4.0 : 3.2;
+        const sY = isActive ? 1.0 : 0.8;
+        p.nameTag.scale.set(sX, sY, 1);
+      }
     });
 
     const activeIdx2 = this.activePlayerIdx2;
@@ -1421,6 +1487,11 @@ export class FootballGame {
       const isActive = (idx === activeIdx2);
       p.ringMat.opacity = isActive ? 0.85 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
+      if (p.nameTag) {
+        const sX = isActive ? 4.0 : 3.2;
+        const sY = isActive ? 1.0 : 0.8;
+        p.nameTag.scale.set(sX, sY, 1);
+      }
     });
 
     // 4. Telecamera dinamica 2.5D (insegue dolcemente la palla con visuale panoramica chiara)

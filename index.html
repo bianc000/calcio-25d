@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>MSoccer - Calcio 2.5D Arcade Multiplayer</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>">
@@ -195,15 +195,29 @@
       <button class="emote-btn">🔥 Andiamo!</button>
     </div>
 
-    <!-- Controlli Touch per Dispositivi Mobili -->
+    <!-- Controlli Touch Dinamici per Smartphone e Tablet -->
     <div class="touch-controls">
-      <div id="touch-stick" class="touch-stick-zone">
-        <div id="touch-knob" class="touch-stick-knob"></div>
+      <!-- Area Joystick Sinistra (Toccare ovunque su questa metà crea/muove il pad) -->
+      <div id="touch-stick-area" class="touch-stick-area">
+        <div id="touch-stick" class="touch-stick-zone">
+          <div id="touch-knob" class="touch-stick-knob"></div>
+        </div>
       </div>
+
+      <!-- Pulsanti Azione Destra -->
       <div class="touch-btn-group">
-        <div id="touch-pass" class="touch-btn" style="border-color: #ffd700;">PASS</div>
-        <div id="touch-shoot" class="touch-btn" style="border-color: #ff0055;">TIRO</div>
-        <div id="touch-switch" class="touch-btn" style="border-color: #00f0ff;">CAMBIA</div>
+        <div id="touch-switch" class="touch-btn touch-btn-switch">
+          <span class="btn-icon">🔄</span>
+          <span class="btn-label">CAMBIA</span>
+        </div>
+        <div id="touch-pass" class="touch-btn touch-btn-pass">
+          <span class="btn-icon">👟</span>
+          <span class="btn-label">PASS</span>
+        </div>
+        <div id="touch-shoot" class="touch-btn touch-btn-shoot">
+          <span class="btn-icon">⚽</span>
+          <span class="btn-label">TIRO</span>
+        </div>
       </div>
     </div>
   </div>

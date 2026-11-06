@@ -16,6 +16,13 @@ class App {
 
     this.cacheDOMElements();
     this.bindEvents();
+    
+    // Rileva dispositivi touch / smartphone / tablet
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (window.innerWidth <= 1024);
+    if (isTouch) {
+      document.body.classList.add('touch-device');
+    }
+
     this.setupTouchControls();
     this.renderCharacterGrid();
     this.checkUrlParams();
@@ -146,12 +153,38 @@ class App {
   }
 
   setupTouchControls() {
+    const stickArea = document.getElementById('touch-stick-area') || document.getElementById('touch-stick');
     const stickZone = document.getElementById('touch-stick');
     const stickKnob = document.getElementById('touch-knob');
     if (!stickZone || !stickKnob) return;
 
     let touchOrigin = null;
-    const maxRadius = 38;
+    const maxRadius = 46;
+
+    const handleTouchStart = (e) => {
+      if (touchOrigin) return; // Supporta multi-touch senza interferire con la mano destra
+      const touch = e.changedTouches[0];
+      const areaRect = (stickArea && stickArea !== stickZone) 
+        ? stickArea.getBoundingClientRect() 
+        : stickZone.parentElement.getBoundingClientRect();
+
+      // Posiziona la base del joystick esattamente sotto il pollice del giocatore
+      const localX = touch.clientX - areaRect.left;
+      const localY = touch.clientY - areaRect.top;
+
+      stickZone.style.left = `${Math.max(15, localX - 60)}px`;
+      stickZone.style.top = `${Math.max(15, localY - 60)}px`;
+      stickZone.style.bottom = 'auto';
+      stickZone.classList.add('active');
+
+      touchOrigin = {
+        id: touch.identifier,
+        x: touch.clientX,
+        y: touch.clientY
+      };
+      stickKnob.style.transform = `translate(0px, 0px)`;
+      e.preventDefault();
+    };
 
     const handleTouchMove = (e) => {
       if (!touchOrigin || !this.game) return;
@@ -169,54 +202,56 @@ class App {
 
       stickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
 
+      // Normalizzazione vettori movimento
       this.game.input.moveX = knobX / maxRadius;
       this.game.input.moveZ = knobY / maxRadius;
+
+      // Sprint automatico se il joystick viene spinto a fondo (sensibilità analogica naturale)
+      this.game.input.sprint = (clampedDist > maxRadius * 0.82);
+
+      e.preventDefault();
     };
 
-    const handleTouchEnd = () => {
-      touchOrigin = null;
-      stickKnob.style.transform = `translate(0px, 0px)`;
-      if (this.game) {
-        this.game.input.moveX = 0;
-        this.game.input.moveZ = 0;
+    const handleTouchEnd = (e) => {
+      if (!touchOrigin) return;
+      const touch = Array.from(e.changedTouches).find(t => t.identifier === touchOrigin.id);
+      if (touch) {
+        touchOrigin = null;
+        stickKnob.style.transform = `translate(0px, 0px)`;
+        stickZone.classList.remove('active');
+        if (this.game) {
+          this.game.input.moveX = 0;
+          this.game.input.moveZ = 0;
+          this.game.input.sprint = false;
+        }
       }
     };
 
-    stickZone.addEventListener('touchstart', (e) => {
-      const touch = e.changedTouches[0];
-      const rect = stickZone.getBoundingClientRect();
-      touchOrigin = {
-        id: touch.identifier,
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2
-      };
-      handleTouchMove(e);
-      e.preventDefault();
-    }, { passive: false });
+    const targetArea = stickArea || stickZone;
+    targetArea.addEventListener('touchstart', handleTouchStart, { passive: false });
+    targetArea.addEventListener('touchmove', handleTouchMove, { passive: false });
+    targetArea.addEventListener('touchend', handleTouchEnd);
+    targetArea.addEventListener('touchcancel', handleTouchEnd);
 
-    stickZone.addEventListener('touchmove', (e) => {
-      handleTouchMove(e);
-      e.preventDefault();
-    }, { passive: false });
-
-    stickZone.addEventListener('touchend', handleTouchEnd);
-    stickZone.addEventListener('touchcancel', handleTouchEnd);
-
-    // Pulsanti Touch Passaggio, Tiro, Switch
+    // Pulsanti Touch Passaggio, Tiro, Switch con feedback visivo e sonoro
     const btnPass = document.getElementById('touch-pass');
     const btnShoot = document.getElementById('touch-shoot');
     const btnSwitch = document.getElementById('touch-switch');
 
     if (btnPass) {
       btnPass.addEventListener('touchstart', (e) => {
+        btnPass.classList.add('active');
         if (this.game) this.game.input.passTrigger = true;
         sounds.playBeep(700, 0.04);
         e.preventDefault();
       }, { passive: false });
+      btnPass.addEventListener('touchend', () => btnPass.classList.remove('active'));
+      btnPass.addEventListener('touchcancel', () => btnPass.classList.remove('active'));
     }
 
     if (btnShoot) {
       btnShoot.addEventListener('touchstart', (e) => {
+        btnShoot.classList.add('active');
         if (this.game) {
           this.game.input.isChargingShot = true;
           this.game.input.shotPower = Math.max(this.game.input.shotPower, 0.45);
@@ -224,10 +259,12 @@ class App {
             this.game.input.slideTrigger = true;
           }
         }
+        sounds.playBeep(520, 0.04);
         e.preventDefault();
       }, { passive: false });
 
       btnShoot.addEventListener('touchend', (e) => {
+        btnShoot.classList.remove('active');
         if (this.game && this.game.input.isChargingShot) {
           this.game.input.isChargingShot = false;
           this.game.input.shootTrigger = true;
@@ -235,13 +272,18 @@ class App {
         }
         e.preventDefault();
       }, { passive: false });
+      btnShoot.addEventListener('touchcancel', () => btnShoot.classList.remove('active'));
     }
 
     if (btnSwitch) {
       btnSwitch.addEventListener('touchstart', (e) => {
+        btnSwitch.classList.add('active');
         if (this.game) this.game.input.switchTrigger = true;
+        sounds.playBeep(620, 0.03);
         e.preventDefault();
       }, { passive: false });
+      btnSwitch.addEventListener('touchend', () => btnSwitch.classList.remove('active'));
+      btnSwitch.addEventListener('touchcancel', () => btnSwitch.classList.remove('active'));
     }
   }
 
