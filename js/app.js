@@ -218,11 +218,9 @@ class App {
     if (btnShoot) {
       btnShoot.addEventListener('touchstart', (e) => {
         if (this.game) {
-          const myTeam = this.isHost ? this.game.playersTeam1 : this.game.playersTeam2;
-          const activeIdx = this.isHost ? this.game.activePlayerIdx1 : this.game.activePlayerIdx2;
-          if (this.game.ball.holder === myTeam[activeIdx]) {
-            this.game.input.isChargingShot = true;
-          } else {
+          this.game.input.isChargingShot = true;
+          this.game.input.shotPower = Math.max(this.game.input.shotPower, 0.45);
+          if (!this.game.userTeamHasBall()) {
             this.game.input.slideTrigger = true;
           }
         }
@@ -233,6 +231,7 @@ class App {
         if (this.game && this.game.input.isChargingShot) {
           this.game.input.isChargingShot = false;
           this.game.input.shootTrigger = true;
+          this.game.input.shotBufferTimer = 0.45;
         }
         e.preventDefault();
       }, { passive: false });
