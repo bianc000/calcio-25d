@@ -582,6 +582,7 @@ class App {
       networkManager: this.net,
       onTogglePause: () => this.togglePause(),
       onSpecialTrigger: (data) => this.showSpecialCutin(data.charData),
+      onToast: (msg) => this.showToast(msg),
       onGoal: (team, score, scorer, isSpecial) => this.handleGoal(team, score, scorer, isSpecial),
       onMatchEnd: (score) => this.handleMatchEnd(score),
       onUpdateHUD: (hudData) => this.updateHUD(hudData)

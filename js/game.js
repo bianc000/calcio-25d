@@ -414,12 +414,23 @@ export class FootballGame {
       ctx.fillStyle = isTeam1 ? '#ff3838' : '#00f0ff';
       ctx.fill();
 
-      // Nome del giocatore in grassetto con icona abilità
+      // Nome del giocatore in grassetto con icona abilità e ruolo
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 28px "Rajdhani", sans-serif';
+      ctx.font = 'bold 24px "Rajdhani", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const displayName = icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
+
+      let displayName = icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
+      const charId = (typeof charData === 'object' && charData.id) ? charData.id : '';
+      if (charId === 'jona') displayName = '🦁 JONA (C)';
+      else if (charId === 'bubi') displayName = '🛡️ BUBI (VC)';
+      else if (charId === 'ento') displayName = '🟥 ENTO (ARBITRO)';
+      else if (charId === 'lindi') displayName = '👑 LINDI (BALLER)';
+      else if (charId === 'matti') displayName = '🧱 MATTI (MURO)';
+      else if (charId === 'jelmo') displayName = '⚡ JELMO (FLASH)';
+      else if (charId === 'roby') displayName = '🦷 ROBY (DENTISTA)';
+      else if (charId === 'lollo') displayName = '🍺 LOLLO (BIRRA)';
+
       ctx.fillText(displayName, 142, 33);
     }
 
@@ -514,10 +525,12 @@ export class FootballGame {
       root.add(hair);
     }
 
-    // Fascia o capitano
-    if (charData.hairStyle === 'headband' || isCaptain) {
+    // Fascia Capitano (Jona) o Vice Capitano (Bubi)
+    const isCap = isCaptain || charData.id === 'jona';
+    const isViceCap = charData.id === 'bubi';
+    if (charData.hairStyle === 'headband' || isCap || isViceCap) {
       const bandGeo = new window.THREE.CylinderGeometry(0.5 * scale, 0.5 * scale, 0.12 * scale, 16);
-      const bandMat = new window.THREE.MeshBasicMaterial({ color: 0xffdd00 });
+      const bandMat = new window.THREE.MeshBasicMaterial({ color: isCap ? 0xffdd00 : (isViceCap ? 0xcccccc : 0xffdd00) });
       const band = new window.THREE.Mesh(bandGeo, bandMat);
       band.position.y = 2.05 * scale;
       root.add(band);
@@ -612,7 +625,9 @@ export class FootballGame {
         protectionTimer: 0,
         tackleCooldown: 0,
         possessionTime: 0,
-        cannotPickupTimer: 0
+        cannotPickupTimer: 0,
+        isExpelled: false,
+        expelledTimer: 0
       };
       meshData.root.position.set(p.x, 0, p.z);
       this.scene.add(meshData.root);
@@ -649,7 +664,9 @@ export class FootballGame {
         protectionTimer: 0,
         tackleCooldown: 0,
         possessionTime: 0,
-        cannotPickupTimer: 0
+        cannotPickupTimer: 0,
+        isExpelled: false,
+        expelledTimer: 0
       };
       meshData.root.position.set(p.x, 0, p.z);
       meshData.root.rotation.y = Math.PI;
@@ -796,6 +813,9 @@ export class FootballGame {
       p.vx = 0;
       p.vz = 0;
       p.isSliding = false;
+      p.isExpelled = false;
+      p.expelledTimer = 0;
+      p.mesh.position.set(p.x, 0, p.z);
     });
 
     this.playersTeam2.forEach(p => {
@@ -804,6 +824,9 @@ export class FootballGame {
       p.vx = 0;
       p.vz = 0;
       p.isSliding = false;
+      p.isExpelled = false;
+      p.expelledTimer = 0;
+      p.mesh.position.set(p.x, 0, p.z);
     });
 
     // Chi batte riceve la palla vicino
@@ -892,6 +915,25 @@ export class FootballGame {
 
   // Aggiorna stato di un giocatore
   updatePlayer(p, inputData, dt) {
+    // Se espulso con Cartellino Rosso dello Sbirro Arbitro: resta a bordo campo
+    if (p.isExpelled) {
+      p.expelledTimer -= dt;
+      p.x = (p.team === 1 ? -12 : 12);
+      p.z = (this.FIELD_H / 2) + 4.5;
+      p.vx = 0;
+      p.vz = 0;
+      p.mesh.position.set(p.x, 0, p.z);
+      if (p.expelledTimer <= 0) {
+        p.isExpelled = false;
+        p.x = p.baseX;
+        p.z = p.baseZ;
+        p.mesh.position.set(p.x, 0, p.z);
+        sounds.playWhistle(false);
+        if (this.options.onToast) this.options.onToast(`⏱️ ${p.name.toUpperCase()} RIENTRA DALL'ESPULSIONE!`);
+      }
+      return;
+    }
+
     const stats = p.charData;
     const isHuman = (p.team === 1 && !this.options.isClient && p.index === this.activePlayerIdx1) ||
                     (p.team === 2 && this.options.isClient && p.index === this.activePlayerIdx2);
@@ -1308,6 +1350,11 @@ export class FootballGame {
 
   // Intelligenza Artificiale Calibrata (Intelligente ma più passiva, lasciando il pieno controllo al giocatore)
   updateAI(p, dt) {
+    if (p.isExpelled) {
+      this.updatePlayer(p, {}, dt);
+      return;
+    }
+
     const stats = p.charData;
     const aiInput = {
       moveX: 0,
@@ -1657,6 +1704,10 @@ export class FootballGame {
     sounds.playSpecialStrike(char.specialType);
     if (char.id === 'ara') {
       sounds.playEagleCry();
+    } else if (char.id === 'lollo') {
+      sounds.playBeerShot();
+    } else if (char.id === 'ento') {
+      sounds.playRedCardWhistle();
     }
 
     // Libera la palla e prepara la super mossa
@@ -1702,60 +1753,203 @@ export class FootballGame {
         break;
       }
 
-      case 'ento': { // CANNONE INFUOCATO
+      case 'ento': { // CARTELLINO ROSSO DELLO SBIRRO ARBITRO
+        sounds.playRedCardWhistle();
+        this.addCameraShake(0.85);
+
+        // Trova l'avversario più pericoloso (o il portatore di palla)
+        let expelled = (this.ball.holder && this.ball.holder.team !== teamNum) ? this.ball.holder : null;
+        if (!expelled) {
+          let maxRating = -1;
+          oppTeam.forEach(opp => {
+            const rating = (opp.charData.shot || 0) + (opp.charData.speed || 0);
+            if (rating > maxRating && !opp.isExpelled) {
+              maxRating = rating;
+              expelled = opp;
+            }
+          });
+        }
+        if (!expelled) expelled = oppTeam[0];
+
+        if (expelled) {
+          expelled.isExpelled = true;
+          expelled.expelledTimer = 12.0; // Espulso dal campo per 12 secondi!
+          expelled.cannotPickupTimer = 12.0;
+          expelled.protectionTimer = 0;
+          if (this.ball.holder === expelled) {
+            this.ball.holder = null;
+            this.ball.vx = (Math.random() - 0.5) * 6;
+            this.ball.vz = (Math.random() - 0.5) * 6;
+            this.ball.vy = 2.0;
+          }
+          expelled.x = (expelled.team === 1 ? -12 : 12);
+          expelled.z = (this.FIELD_H / 2) + 4.5;
+          expelled.vx = 0;
+          expelled.vz = 0;
+          expelled.mesh.position.set(expelled.x, 0, expelled.z);
+
+          if (this.options.onToast) {
+            this.options.onToast(`🟥 CARTELLINO ROSSO! ${expelled.name.toUpperCase()} ESPULSO PER 12S!`);
+          }
+        }
+        this.ball.holder = player;
+        player.protectionTimer = 1.6;
+        break;
+      }
+
+      case 'lindi': { // ROVESCIATA DA BALLER (L'ATTACCANTE PIÙ FORTE)
+        const targetZ = (player.z >= 0) ? -4.5 : 4.5;
         const dx = targetGoalX - player.x;
-        const dz = 0 - player.z;
+        const dz = targetZ - player.z;
         const dist = Math.hypot(dx, dz) || 1;
+
+        // Balzo e rovesciata acrobatica in aria
+        player.mesh.position.y = 2.4 * player.scale;
+        player.mesh.rotation.x = -Math.PI * 1.5;
+
         this.ball.x = player.x + (dx / dist) * 1.5;
         this.ball.z = player.z + (dz / dist) * 1.5;
-        this.ball.y = 1.4;
-        this.ball.vx = (dx / dist) * 42;
-        this.ball.vz = (dz / dist) * 42;
-        this.ball.vy = 3.6;
+        this.ball.y = 2.2;
+
+        const ballerSpeed = 44; // Bordata atomica da bomber #1
+        this.ball.vx = (dx / dist) * ballerSpeed;
+        this.ball.vz = (dz / dist) * ballerSpeed;
+        this.ball.vy = 2.6;
+
         this.ball.isSpecialShot = true;
-        this.ball.specialType = 'fire_cannon';
+        this.ball.specialType = 'baller_bicycle';
         this.ball.specialShooter = player;
         this.ball.lastShooter = player;
         this.ball.lastKicker = player;
+
+        sounds.playVolley();
+        this.addCameraShake(1.4);
+
+        // Onda d'urto che travolge i difensori
+        oppTeam.forEach(opp => {
+          const dOpp = Math.hypot(opp.x - player.x, opp.z - player.z);
+          if (dOpp < 9.0) {
+            opp.vx = Math.sign(opp.x - player.x || 1) * 11;
+            opp.vz = Math.sign(opp.z - player.z || 1) * 11;
+            opp.isSliding = true;
+            opp.slideTimer = 1.3;
+          }
+        });
         break;
       }
 
-      case 'bubi':
-      case 'jona': { // TACKLE TERREMOTO / CARICA DEL GLADIATORE
+      case 'bubi': { // BLOCCO ROCCIOSO TOTALE (VICE CAPITANO ROCCIA)
+        oppTeam.forEach(opp => {
+          opp.isSliding = true;
+          opp.slideTimer = 2.8; // Atterra e congela tutti
+          opp.cannotPickupTimer = 2.8;
+          opp.protectionTimer = 0;
+          opp.vx = 0;
+          opp.vz = 0;
+        });
+        this.ball.holder = player;
+        player.protectionTimer = 2.0;
+        sounds.playBodyCheck();
+        this.addCameraShake(1.2);
+        break;
+      }
+
+      case 'jona': { // CARICA DELLA GARRA & CAZZIMMA DEL CAPITANO
         oppTeam.forEach(opp => {
           const d = Math.hypot(opp.x - player.x, opp.z - player.z);
-          if (d < 15) {
+          if (d < 16) {
             opp.isSliding = true;
-            opp.slideTimer = 2.0;
-            opp.cannotPickupTimer = 2.0;
+            opp.slideTimer = 2.2;
+            opp.cannotPickupTimer = 2.2;
             opp.protectionTimer = 0;
-            opp.vx = Math.sign(opp.x - player.x || 1) * 12;
-            opp.vz = Math.sign(opp.z - player.z || 1) * 12;
+            opp.vx = Math.sign(opp.x - player.x || 1) * 14;
+            opp.vz = Math.sign(opp.z - player.z || 1) * 10;
           }
         });
         this.ball.holder = player;
-        player.protectionTimer = 1.5;
-        sounds.playSlide();
+        player.protectionTimer = 2.4;
+        player.vx = Math.sign(targetGoalX - player.x) * 18;
+        sounds.playPowerShot();
+        this.addCameraShake(1.15);
         break;
       }
 
-      case 'matti': { // SCATTO FULMINEO
+      case 'matti': { // MURO DEL MURATORE (BLOCCA TUTTI GLI ATTACCHI)
+        this.goalShieldTeam = teamNum;
+        this.goalShieldTimer = 12.0; // 12 secondi di porta blindata dal muro!
+        oppTeam.forEach(opp => {
+          opp.isSliding = true;
+          opp.slideTimer = 2.2;
+          opp.cannotPickupTimer = 2.2;
+          opp.protectionTimer = 0;
+          opp.vx = Math.sign(opp.x - player.x || 1) * 12;
+          opp.vz = Math.sign(opp.z - player.z || 1) * 8;
+        });
+        this.ball.holder = player;
+        player.protectionTimer = 2.0;
+        sounds.playBodyCheck();
+        this.addCameraShake(1.15);
+        break;
+      }
+
+      case 'jelmo': { // DIFENSORE FULMINE - SCATTO DEL LAMPO
         player.stamina = 100;
         player.cannotPickupTimer = 0;
         this.ball.holder = player;
-        player.protectionTimer = 2.0;
-        player.vx = Math.sign(targetGoalX - player.x) * 22;
+        player.protectionTimer = 2.4;
+        player.vx = Math.sign(targetGoalX - player.x) * 26; // Velocità fulminea 26!
+        player.vz = 0;
+        sounds.playPowerShot();
+        this.addCameraShake(0.9);
         break;
       }
 
-      case 'jelmo': { // MURO INVALICABILE
-        this.goalShieldTeam = teamNum;
-        this.goalShieldTimer = 10.0;
-        sounds.playWhistle(false);
+      case 'roby': { // IL DENTISTA - INTERVENTO CHIRURGICO
+        oppTeam.forEach(opp => {
+          const d = Math.hypot(opp.x - player.x, opp.z - player.z);
+          if (d < 18) {
+            opp.isSliding = true;
+            opp.slideTimer = 2.5;
+            opp.cannotPickupTimer = 2.5;
+            opp.protectionTimer = 0;
+            opp.vx = 0;
+            opp.vz = 0;
+          }
+        });
+        this.ball.holder = player;
+        player.protectionTimer = 2.2;
+        sounds.playSlide();
+        sounds.playBodyCheck();
+        this.addCameraShake(1.0);
         break;
       }
 
-      default: { // Altri tiri speciali (Lollo, Roby, Pibe, Kri, Leon, Lindi)
+      case 'lollo': { // IL BEVITORE DI BIRRA - TIRO ALLA BIRRA
+        const targetZ = (Math.random() > 0.5 ? 4.2 : -4.2);
+        const dx = targetGoalX - player.x;
+        const dz = targetZ - player.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        this.ball.x = player.x + (dx / dist) * 1.5;
+        this.ball.z = player.z + (dz / dist) * 1.5;
+        this.ball.y = 1.3;
+
+        const beerSpeed = 39;
+        this.ball.vx = (dx / dist) * beerSpeed;
+        this.ball.vz = (dz / dist) * beerSpeed + 7.0;
+        this.ball.vy = 3.6;
+        this.ball.spinZ = 12.0; // Effetto a curva ubriacante
+        this.ball.isSpecialShot = true;
+        this.ball.specialType = 'beer_shot';
+        this.ball.specialShooter = player;
+        this.ball.lastShooter = player;
+        this.ball.lastKicker = player;
+
+        sounds.playBeerShot();
+        this.addCameraShake(1.15);
+        break;
+      }
+
+      default: { // Altri tiri speciali (Pibe, Kri, Leon)
         const targetZ = (Math.random() > 0.5 ? 3.5 : -3.5);
         const dx = targetGoalX - player.x;
         const dz = targetZ - player.z;
@@ -1765,7 +1959,7 @@ export class FootballGame {
         this.ball.y = 1.2;
         const pwr = 36;
         this.ball.vx = (dx / dist) * pwr;
-        this.ball.vz = (dz / dist) * pwr + (char.id === 'lollo' ? 8 : 0);
+        this.ball.vz = (dz / dist) * pwr;
         this.ball.vy = (char.id === 'pibe' ? 6.5 : 3.8);
         this.ball.isSpecialShot = true;
         this.ball.specialType = char.id;
@@ -1799,6 +1993,19 @@ export class FootballGame {
       this.ball.vz += (targetGoalZ - this.ball.z) * 0.14;
       if (this.ball.y < 2.0 && Math.abs(this.ball.x) < this.FIELD_W / 2 - 2) {
         this.ball.vy += 0.8;
+      }
+    }
+
+    // Effetto traiettoria ubriacante del Tiro alla Birra di Lollo
+    if (this.ball.isSpecialShot && this.ball.specialType === 'beer_shot') {
+      this.ball.vz += Math.sin(performance.now() * 0.02) * 1.5;
+      this.ball.spinZ += Math.cos(performance.now() * 0.015) * 2.2;
+    }
+
+    // Effetto aerodinamico della Rovesciata da Baller di Lindi
+    if (this.ball.isSpecialShot && this.ball.specialType === 'baller_bicycle') {
+      if (this.ball.y < 1.8 && Math.abs(this.ball.x) < this.FIELD_W / 2 - 2) {
+        this.ball.vy += 0.55;
       }
     }
 
@@ -1906,7 +2113,11 @@ export class FootballGame {
           this.ballTrail[i].mesh.position.copy(this.ballTrail[i - 1].mesh.position);
           this.ballTrail[i].mesh.visible = true;
           this.ballTrail[i].mat.opacity = (1 - (i / this.ballTrail.length)) * 0.65;
-          if (this.ball.isSpecialShot) {
+          if (this.ball.specialType === 'beer_shot') {
+            this.ballTrail[i].mat.color.setHex(0xf59e0b); // Scia oro spumeggiante birra
+          } else if (this.ball.specialType === 'baller_bicycle') {
+            this.ballTrail[i].mat.color.setHex(0xe11d48); // Scia rubino infuocata bomber
+          } else if (this.ball.isSpecialShot) {
             this.ballTrail[i].mat.color.setHex(0xffaa00);
           } else {
             this.ballTrail[i].mat.color.setHex(0x00f0ff);
@@ -1915,7 +2126,13 @@ export class FootballGame {
         this.ballTrail[0].mesh.position.set(this.ball.x, this.ball.y, this.ball.z);
         this.ballTrail[0].mesh.visible = true;
         this.ballTrail[0].mat.opacity = 0.75;
-        this.ballTrail[0].mat.color.setHex(this.ball.isSpecialShot ? 0xffdd00 : 0x00ffff);
+        if (this.ball.specialType === 'beer_shot') {
+          this.ballTrail[0].mat.color.setHex(0xfbbf24);
+        } else if (this.ball.specialType === 'baller_bicycle') {
+          this.ballTrail[0].mat.color.setHex(0xf43f5e);
+        } else {
+          this.ballTrail[0].mat.color.setHex(this.ball.isSpecialShot ? 0xffdd00 : 0x00ffff);
+        }
       } else {
         for (let i = 0; i < this.ballTrail.length; i++) {
           this.ballTrail[i].mat.opacity *= 0.82;

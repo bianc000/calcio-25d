@@ -375,6 +375,69 @@ class SoundManager {
     osc.start(now);
     osc.stop(now + 0.15);
   }
+
+  // Fischio autoritario Cartellino Rosso dello Sbirro Arbitro
+  playRedCardWhistle() {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    const now = this.ctx.currentTime;
+
+    [0, 0.12].forEach((offset) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(2600, now + offset);
+      osc.frequency.setValueAtTime(2200, now + offset + 0.04);
+      osc.frequency.setValueAtTime(2800, now + offset + 0.08);
+
+      gain.gain.setValueAtTime(0.55, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.18);
+    });
+  }
+
+  // Tiro alla Birra spumeggiante e ubriacante di Lollo
+  playBeerShot() {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    this.playPowerShot();
+    const now = this.ctx.currentTime;
+
+    // Bollicine ed effervescenza frizzante
+    const bufferSize = this.ctx.sampleRate * 0.25;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = (Math.random() * 2 - 1) * Math.sin(i * 0.08);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.4, now);
+    nGain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+    noise.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(now);
+
+    // Tono spumeggiante a scivolamento
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(650, now + 0.14);
+    osc.frequency.exponentialRampToValueAtTime(320, now + 0.26);
+
+    gain.gain.setValueAtTime(0.45, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.26);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.26);
+  }
 }
 
 export const sounds = new SoundManager();
