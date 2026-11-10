@@ -1,6 +1,6 @@
 // Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.8';
-import { sounds } from './audio.js?v=2.8';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.9';
+import { sounds } from './audio.js?v=2.9';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -405,28 +405,28 @@ export class FootballGame {
     ctx.shadowBlur = 20;
     ctx.fill();
 
-    // Nome del giocatore con ruolo e icona distintiva
+    // Nome del giocatore con ruolo e icona distintiva (compatto e pulito)
     let displayName = icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
     const charId = (typeof charData === 'object' && charData.id) ? charData.id : '';
-    if (charId === 'ara' || isAraChar) displayName = '🦅 ARA (FALCO)';
+    if (charId === 'ara' || isAraChar) displayName = '🦅 ARA';
     else if (charId === 'jona') displayName = '🦁 JONA (C)';
     else if (charId === 'bubi') displayName = '🛡️ BUBI (VC)';
-    else if (charId === 'ento') displayName = '🟥 ENTO (ARB)';
-    else if (charId === 'lindi') displayName = '👑 LINDI (BOMBER)';
-    else if (charId === 'matti') displayName = '🧱 MATTI (MURO)';
-    else if (charId === 'jelmo') displayName = '⚡ JELMO (FLASH)';
-    else if (charId === 'roby') displayName = '🦷 ROBY (DENTISTA)';
-    else if (charId === 'lollo') displayName = '🍺 LOLLO (BIRRA)';
-    else if (charId === 'kri') displayName = '🐍 KRI (VIPER)';
-    else if (charId === 'leon') displayName = '🦁 LEON (LEONE)';
-    else if (charId === 'pibe') displayName = '🪄 PIBE (MAGO)';
+    else if (charId === 'ento') displayName = '🟥 ENTO';
+    else if (charId === 'lindi') displayName = '👑 LINDI';
+    else if (charId === 'matti') displayName = '🧱 MATTI';
+    else if (charId === 'jelmo') displayName = '⚡ JELMO';
+    else if (charId === 'roby') displayName = '🦷 ROBY';
+    else if (charId === 'lollo') displayName = '🍺 LOLLO';
+    else if (charId === 'kri') displayName = '🐍 KRI';
+    else if (charId === 'leon') displayName = '🦁 LEON';
+    else if (charId === 'pibe') displayName = '🪄 PIBE';
 
     // Font grande, bold e nitido ad altissima visibilità
-    let baseFontSize = isAraChar ? 62 : 56;
+    let baseFontSize = 66;
     ctx.font = `900 ${baseFontSize}px "Rajdhani", "Arial Black", sans-serif`;
     let measuredWidth = ctx.measureText(displayName).width;
-    if (measuredWidth > 470) {
-      baseFontSize = Math.floor(baseFontSize * (470 / measuredWidth));
+    if (measuredWidth > 460) {
+      baseFontSize = Math.floor(baseFontSize * (460 / measuredWidth));
       ctx.font = `900 ${baseFontSize}px "Rajdhani", "Arial Black", sans-serif`;
     }
 
@@ -531,7 +531,7 @@ export class FootballGame {
     // 2. VERO VOLTO FOTOGRAFICO IN-GAME (Stile Mario Strikers / Bobblehead)
     // Mostra la reale foto dell'amico sempre rivolta alla telecamera con grandissima definizione
     const loader = new window.THREE.TextureLoader();
-    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=2.8`;
+    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=2.9`;
     const faceTex = loader.load(avatarPath);
     const faceMat = new window.THREE.SpriteMaterial({
       map: faceTex,
@@ -584,10 +584,10 @@ export class FootballGame {
     arrow.position.set(0, 0.05, 1.6 * scale);
     root.add(arrow);
 
-    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa (grande e ultra-visibile)
+    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa (proporzionato, nitido ed elegante)
     const nameTag = this.createNameTag(charData, teamColor, charData.id === 'ara');
-    nameTag.position.set(0, 4.3 * scale, 0);
-    nameTag.scale.set(13.5, 3.4, 1);
+    nameTag.position.set(0, 3.85 * scale, 0);
+    nameTag.scale.set(3.2 * scale, 0.8 * scale, 1);
     root.add(nameTag);
 
     return { root, ring, ringMat, arrow, arrowMat, nameTag, scale };
@@ -2342,17 +2342,17 @@ export class FootballGame {
       }
     }
 
-    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (grandi, nitidi ed ultra-visibili)
+    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (proporzionati ed eleganti)
     const activeIdx1 = this.activePlayerIdx1;
     this.playersTeam1.forEach((p, idx) => {
       const isActive = (idx === activeIdx1);
       p.ringMat.opacity = isActive ? 0.9 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
       if (p.nameTag) {
-        const sX = isActive ? 16.5 : 13.5;
-        const sY = isActive ? 4.1 : 3.35;
+        const sX = (isActive ? 3.5 : 2.7) * p.scale;
+        const sY = (isActive ? 0.88 : 0.68) * p.scale;
         p.nameTag.scale.set(sX, sY, 1);
-        p.nameTag.position.y = 4.3 * p.scale;
+        p.nameTag.position.y = 3.85 * p.scale;
       }
     });
 
@@ -2362,10 +2362,10 @@ export class FootballGame {
       p.ringMat.opacity = isActive ? 0.9 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
       if (p.nameTag) {
-        const sX = isActive ? 16.5 : 13.5;
-        const sY = isActive ? 4.1 : 3.35;
+        const sX = (isActive ? 3.5 : 2.7) * p.scale;
+        const sY = (isActive ? 0.88 : 0.68) * p.scale;
         p.nameTag.scale.set(sX, sY, 1);
-        p.nameTag.position.y = 4.3 * p.scale;
+        p.nameTag.position.y = 3.85 * p.scale;
       }
     });
 
