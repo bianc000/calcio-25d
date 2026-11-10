@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.5';
-import { FootballGame } from './game.js?v=2.5';
-import { NetworkManager } from './network.js?v=2.5';
-import { sounds } from './audio.js?v=2.5';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.6';
+import { FootballGame } from './game.js?v=2.6';
+import { NetworkManager } from './network.js?v=2.6';
+import { sounds } from './audio.js?v=2.6';
 
 class App {
   constructor() {
@@ -622,7 +622,7 @@ class App {
     }
   }
 
-  // Mostra il Cinematic Cut-in Mario Strikers per la Super Abilità
+  // Mostra il Banner compatto Mario Strikers per la Super Abilità (non copre il campo)
   showSpecialCutin(charData) {
     const cutinEl = document.getElementById('special-cutin');
     if (!cutinEl || !charData) return;
@@ -632,23 +632,28 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || 'assets/ara_avatar.png';
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=2.6`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
     }
     if (specialEl) {
       const icon = charData.specialIcon || '⚡';
-      specialEl.innerText = `${icon} ${charData.special.toUpperCase()}! ${icon}`;
+      specialEl.innerText = `${icon} ${charData.special.toUpperCase()}`;
       if (charData.specialColor) {
         specialEl.style.color = charData.specialColor;
       }
     }
 
+    if (this._specialCutinTimeout) {
+      clearTimeout(this._specialCutinTimeout);
+    }
+
     cutinEl.classList.add('active');
-    setTimeout(() => {
+    this._specialCutinTimeout = setTimeout(() => {
       cutinEl.classList.remove('active');
-    }, 1300);
+      this._specialCutinTimeout = null;
+    }, 1400);
   }
 
   handleGoal(team, score, scorer, isSpecial) {
