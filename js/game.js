@@ -1,6 +1,6 @@
 // Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.3';
-import { sounds } from './audio.js?v=2.3';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.4';
+import { sounds } from './audio.js?v=2.4';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -36,6 +36,8 @@ export class FootballGame {
 
     // Impatto visivo Camera Shake dinamico
     this.cameraShake = 0;
+    this.isKeyboardActive = false;
+    this.lastScoringTeam = 1;
 
     // Input locale
     this.input = {
@@ -47,6 +49,7 @@ export class FootballGame {
       shootTrigger: false,
       shotBufferTimer: 0,
       passTrigger: false,
+      passBufferTimer: 0,
       slideTrigger: false,
       switchTrigger: false
     };
@@ -61,13 +64,14 @@ export class FootballGame {
       shootTrigger: false,
       shotBufferTimer: 0,
       passTrigger: false,
+      passBufferTimer: 0,
       slideTrigger: false,
       switchTrigger: false
     };
 
-    // Giocatore controllato attivamente
-    this.activePlayerIdx1 = 0;
-    this.activePlayerIdx2 = 0;
+    // Giocatore controllato attivamente (inizia controllando l'attaccante al centro 2 anziché il portiere 0)
+    this.activePlayerIdx1 = 2;
+    this.activePlayerIdx2 = 2;
 
     // Setup Three.js
     this.initThree();
@@ -690,6 +694,7 @@ export class FootballGame {
 
     window.addEventListener('keydown', (e) => {
       this.keysDown[e.code] = true;
+      this.isKeyboardActive = true;
 
       // Pausa (Escape o P)
       if (e.code === 'Escape' || e.code === 'KeyP') {
@@ -707,12 +712,10 @@ export class FootballGame {
         e.preventDefault();
       }
 
-      // Tasti di Tiro: X, K, C, V, Invio
-      const isShootKey = (e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV' || e.code === 'Enter');
-
       // Tasti di Passaggio: Z, J, B
       if (e.code === 'KeyZ' || e.code === 'KeyJ' || e.code === 'KeyB') {
         this.input.passTrigger = true;
+        this.input.passBufferTimer = 0.5;
       }
 
       // Spazio: se la nostra squadra ha la palla, TIRO! Altrimenti cambia giocatore attivo!
@@ -721,6 +724,8 @@ export class FootballGame {
           this.input.isChargingShot = true;
           this.input.shotPower = Math.max(this.input.shotPower, 0.45);
         } else {
+          const myTeam = this.options.isClient ? 2 : 1;
+          this.switchActivePlayer(myTeam);
           this.input.switchTrigger = true;
         }
         e.preventDefault();
@@ -728,11 +733,14 @@ export class FootballGame {
 
       // Q: sempre cambio giocatore manuale
       if (e.code === 'KeyQ') {
+        const myTeam = this.options.isClient ? 2 : 1;
+        this.switchActivePlayer(myTeam);
         this.input.switchTrigger = true;
         e.preventDefault();
       }
 
       // Se premi uno dei tasti di tiro (X, K, C, V, Invio)
+      const isShootKey = (e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV' || e.code === 'Enter');
       if (isShootKey) {
         this.input.isChargingShot = true;
         this.input.shotPower = Math.max(this.input.shotPower, 0.45);
@@ -753,13 +761,14 @@ export class FootballGame {
       if (isShootKey && this.input.isChargingShot) {
         this.input.isChargingShot = false;
         this.input.shootTrigger = true;
-        this.input.shotBufferTimer = 0.45; // Finestra buffer di 450ms per colpire
+        this.input.shotBufferTimer = 0.5; // Finestra buffer di 500ms per colpire
       }
     });
 
-    // Supporto Click del Mouse per calciare
+    // Supporto Click del Mouse solo su desktop se si clicca direttamente sul Canvas di gioco
     window.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.interactive') || e.target.tagName === 'BUTTON') return;
+      // Ignora completamente eventi touch emulati e click su comandi touch/UI
+      if (e.pointerType === 'touch' || e.target.closest('#in-game-touch-controls') || e.target.closest('.interactive') || e.target.tagName !== 'CANVAS') return;
       this.input.isChargingShot = true;
       this.input.shotPower = Math.max(this.input.shotPower, 0.45);
       if (!this.userTeamHasBall()) {
@@ -767,11 +776,12 @@ export class FootballGame {
       }
     });
 
-    window.addEventListener('mouseup', () => {
+    window.addEventListener('mouseup', (e) => {
+      if (e.pointerType === 'touch' || e.target.closest('#in-game-touch-controls') || e.target.closest('.interactive')) return;
       if (this.input.isChargingShot) {
         this.input.isChargingShot = false;
         this.input.shootTrigger = true;
-        this.input.shotBufferTimer = 0.45;
+        this.input.shotBufferTimer = 0.5;
       }
     });
 
@@ -830,16 +840,35 @@ export class FootballGame {
       p.mesh.position.set(p.x, 0, p.z);
     });
 
-    // Chi batte riceve la palla vicino
+    // Chi batte riceve la palla vicino e viene selezionato come giocatore attivo!
     if (concedingTeam === 1) {
       // Batte Team 1
-      this.playersTeam1[2].x = -1.5;
-      this.playersTeam1[2].z = 0;
+      const striker = this.playersTeam1[2];
+      striker.x = -1.2;
+      striker.z = 0;
+      striker.possessionTime = 0;
+      striker.protectionTimer = 0.6;
+      striker.cannotPickupTimer = 0;
+      this.ball.holder = striker;
+      this.ball.x = -0.3;
+      this.ball.z = 0;
+      this.activePlayerIdx1 = 2; // Controllo immediato sull'attaccante che batte al centro!
     } else {
       // Batte Team 2
-      this.playersTeam2[2].x = 1.5;
-      this.playersTeam2[2].z = 0;
+      const striker = this.playersTeam2[2];
+      striker.x = 1.2;
+      striker.z = 0;
+      striker.possessionTime = 0;
+      striker.protectionTimer = 0.6;
+      striker.cannotPickupTimer = 0;
+      this.ball.holder = striker;
+      this.ball.x = 0.3;
+      this.ball.z = 0;
+      this.activePlayerIdx2 = 2; // Controllo immediato sull'attaccante che batte al centro!
     }
+
+    this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
+    this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
 
     this.state = 'playing';
     sounds.playWhistle(false);
@@ -855,13 +884,15 @@ export class FootballGame {
     this.isPaused = paused;
   }
 
-  // Switch al compagno più vicino alla palla
+  // Switch al compagno più vicino alla palla (escludendo il giocatore già attivo e quelli espulsi)
   switchActivePlayer(teamNum) {
     const team = (teamNum === 1) ? this.playersTeam1 : this.playersTeam2;
-    let closestIdx = 0;
+    const currentIdx = (teamNum === 1) ? this.activePlayerIdx1 : this.activePlayerIdx2;
+    let closestIdx = -1;
     let minDist = 99999;
 
     team.forEach((p, idx) => {
+      if (idx === currentIdx || p.isExpelled) return;
       const dx = p.x - this.ball.x;
       const dz = p.z - this.ball.z;
       const dist = Math.hypot(dx, dz);
@@ -871,12 +902,14 @@ export class FootballGame {
       }
     });
 
-    if (teamNum === 1) {
-      this.activePlayerIdx1 = closestIdx;
-    } else {
-      this.activePlayerIdx2 = closestIdx;
+    if (closestIdx !== -1) {
+      if (teamNum === 1) {
+        this.activePlayerIdx1 = closestIdx;
+      } else {
+        this.activePlayerIdx2 = closestIdx;
+      }
+      sounds.playBeep(750, 0.05);
     }
-    sounds.playBeep(750, 0.05);
   }
 
   // Aggiorna input da tastiera
@@ -889,21 +922,28 @@ export class FootballGame {
     if (this.keysDown['ArrowUp'] || this.keysDown['KeyW']) mz -= 1;
     if (this.keysDown['ArrowDown'] || this.keysDown['KeyS']) mz += 1;
 
-    // Normalizza direzione
+    // Normalizza direzione da tastiera senza cancellare l'input del joystick mobile touch!
     const len = Math.hypot(mx, mz);
     if (len > 0) {
       this.input.moveX = mx / len;
       this.input.moveZ = mz / len;
-    } else {
+    } else if (this.isKeyboardActive) {
       this.input.moveX = 0;
       this.input.moveZ = 0;
     }
 
-    this.input.sprint = !!(this.keysDown['ShiftLeft'] || this.keysDown['ShiftRight']);
+    if (this.keysDown['ShiftLeft'] || this.keysDown['ShiftRight']) {
+      this.input.sprint = true;
+    } else if (this.isKeyboardActive) {
+      this.input.sprint = false;
+    }
 
-    // Decrementa finestra buffer tiro
+    // Decrementa finestra buffer tiro e passaggio per non perdere mai i comandi su mobile
     if (this.input.shotBufferTimer > 0) {
       this.input.shotBufferTimer -= dt;
+    }
+    if (this.input.passBufferTimer > 0) {
+      this.input.passBufferTimer -= dt;
     }
 
     // Caricamento tiro (tenendo premuto aumenta, ma un tocco rapido ha già potenza minima)
@@ -943,11 +983,9 @@ export class FootballGame {
     if (p.tackleCooldown > 0) p.tackleCooldown -= dt;
     if (p.cannotPickupTimer > 0) p.cannotPickupTimer -= dt;
 
-    const baseSpeed = 8.5 + (stats.speed / 100) * 3.5; // Velocità calibrata e controllabile (8.5 - 12.0 unità/sec)
-    // Il giocatore umano ha uno sprint reattivo (1.35x), mentre la CPU mantiene un passo più rilassato (82%)
-    const speedMult = inputData.sprint ? (isHuman ? 1.35 : 1.1) : 1.0;
-    const paceFactor = isHuman ? 1.0 : 0.82;
-    const currentMaxSpeed = baseSpeed * speedMult * paceFactor;
+    const baseSpeed = 8.8 + (stats.speed / 100) * 3.6; // Velocità calibrata e controllabile (8.8 - 12.4 unità/sec)
+    const speedMult = inputData.sprint ? (isHuman ? 1.35 : 1.25) : 1.0;
+    const currentMaxSpeed = baseSpeed * speedMult;
 
     // Gestione scivolata difensiva
     if (p.isSliding) {
@@ -960,7 +998,7 @@ export class FootballGame {
 
       // Controlla se colpisce la palla o l'avversario durante la scivolata
       const distBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
-      if (distBall < 2.0 * p.scale && this.ball.holder !== p) {
+      if (distBall < 2.4 * p.scale && this.ball.holder !== p) {
         const holder = this.ball.holder;
         if (!holder || holder.protectionTimer <= 0) {
           this.ball.holder = null;
@@ -993,7 +1031,7 @@ export class FootballGame {
       const enemyCarrier = (this.ball.holder && this.ball.holder.team !== p.team) ? this.ball.holder : null;
       const distToCarrier = enemyCarrier ? Math.hypot(p.x - enemyCarrier.x, p.z - enemyCarrier.z) : 999;
 
-      if (enemyCarrier && distToCarrier < 2.0 * p.scale && p.tackleCooldown <= 0) {
+      if (enemyCarrier && distToCarrier < 2.2 * p.scale && p.tackleCooldown <= 0) {
         // SPALLATA FISICA / BODY CHECK DEVASTANTE!
         sounds.playBodyCheck();
         this.addCameraShake(0.85);
@@ -1074,10 +1112,10 @@ export class FootballGame {
     if (this.ball.holder && this.ball.holder.team !== p.team && !p.isSliding) {
       const carrier = this.ball.holder;
       const distToCarrier = Math.hypot(p.x - carrier.x, p.z - carrier.z);
-      if (distToCarrier < 1.45 * p.scale && carrier.protectionTimer <= 0 && p.tackleCooldown <= 0) {
+      if (distToCarrier < 1.85 * p.scale && carrier.protectionTimer <= 0 && p.tackleCooldown <= 0) {
         p.tackleCooldown = 0.5;
         // Probabilità di vincere il contrasto in base a stat tackle e tempo in cui l'avversario trattiene palla
-        const tackleChance = 0.52 + (stats.tackle / 240) + Math.min(0.35, carrier.possessionTime * 0.2);
+        const tackleChance = 0.55 + (stats.tackle / 200) + Math.min(0.40, carrier.possessionTime * 0.3);
         if (Math.random() < tackleChance) {
           // RUBA PALLA CON SUCCESSO!
           this.ball.holder = p;
@@ -1204,13 +1242,13 @@ export class FootballGame {
         inputData.shotPower = 0;
         inputData.isChargingShot = false;
       }
-      // Esegui passaggio corto o filtrante / cross
-      else if (inputData.passTrigger) {
+      // Esegui passaggio corto o filtrante / cross (con supporto buffer pass per mobile)
+      else if (inputData.passTrigger || (inputData.passBufferTimer && inputData.passBufferTimer > 0)) {
         const teammates = (p.team === 1) ? this.playersTeam1 : this.playersTeam2;
-        const otherTeammates = teammates.filter(mate => mate !== p);
+        const otherTeammates = teammates.filter(mate => mate !== p && !mate.isExpelled);
 
-        // Trova compagno migliore da servire
-        let bestTarget = otherTeammates[0];
+        // Trova compagno migliore da servire (escludendo compagni espulsi)
+        let bestTarget = otherTeammates[0] || teammates[0];
         let bestScore = -9999;
 
         otherTeammates.forEach(mate => {
@@ -1263,6 +1301,7 @@ export class FootballGame {
         this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
 
         inputData.passTrigger = false;
+        inputData.passBufferTimer = 0;
 
         // Auto-switch immediato al ricevitore se il passaggio è della squadra utente
         const userTeam = this.options.isClient ? 2 : 1;
@@ -1610,22 +1649,27 @@ export class FootballGame {
 
         if (p === closestDefender) {
           // DIFENSORE PRIMARIO:
-          // Va incontro al portatore per chiudergli la strada e rubare palla!
+          // Va incontro con decisione al portatore per rubare palla e contrastarlo!
           const dx = holder.x - p.x;
           const dz = holder.z - p.z;
           const dist = Math.hypot(dx, dz);
 
-          if (dist > 0.5) {
+          if (dist > 0.4) {
             aiInput.moveX = dx / dist;
             aiInput.moveZ = dz / dist;
+            aiInput.sprint = (dist > 2.2); // Scatto deciso in pressing
           }
 
-          // Se il portatore ha la palla da oltre 0.4s ed è a distanza di tackle (< 1.6m):
-          if (dist < 1.6 && holder.possessionTime > 0.4 && p.tackleCooldown <= 0) {
-            // Esegue scivolata difensiva se è in corsa o ad angolo
-            if (Math.random() < 0.12) {
+          // Se il portatore è a portata di tackle (< 2.2m) e ha la palla da oltre 0.25s:
+          if (dist < 2.2 && holder.possessionTime > 0.25 && p.tackleCooldown <= 0) {
+            if (dist > 1.35) {
+              // Scivolata / contrasto in allungo
               aiInput.slideTrigger = true;
-              p.tackleCooldown = 1.8;
+              p.tackleCooldown = 0.9;
+            } else {
+              // Contrasto duro in piedi o spallata
+              aiInput.slideTrigger = (Math.random() < 0.45);
+              p.tackleCooldown = 0.5;
             }
           }
         } else if (p.role === 'gk') {
@@ -1788,6 +1832,12 @@ export class FootballGame {
           expelled.vx = 0;
           expelled.vz = 0;
           expelled.mesh.position.set(expelled.x, 0, expelled.z);
+
+          if (expelled.team === 1 && this.activePlayerIdx1 === expelled.index) {
+            this.switchActivePlayer(1);
+          } else if (expelled.team === 2 && this.activePlayerIdx2 === expelled.index) {
+            this.switchActivePlayer(2);
+          }
 
           if (this.options.onToast) {
             this.options.onToast(`🟥 CARTELLINO ROSSO! ${expelled.name.toUpperCase()} ESPULSO PER 12S!`);
@@ -2157,6 +2207,7 @@ export class FootballGame {
     this.state = 'goal';
     this.score[scoringTeam - 1]++;
     this.goalCelebrationTimer = 3.5; // 3.5 secondi di celebrazione
+    this.lastScoringTeam = scoringTeam;
 
     sounds.playGoalCheer();
     this.addCameraShake(1.3);
@@ -2255,14 +2306,15 @@ export class FootballGame {
       this.goalCelebrationTimer -= dt;
       this.updateBall(dt);
 
-      // Fai saltare i giocatori della squadra vincente
-      const celebratingTeam = (this.score[0] > this.score[1]) ? this.playersTeam1 : this.playersTeam2;
+      // Fai esultare i giocatori della squadra che ha appena segnato il gol
+      const celebratingTeam = (this.lastScoringTeam === 1) ? this.playersTeam1 : this.playersTeam2;
       celebratingTeam.forEach(p => {
         p.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.008)) * 1.2;
       });
 
       if (this.goalCelebrationTimer <= 0) {
-        const nextKickoffTeam = (this.score[0] > this.score[1]) ? 2 : 1;
+        // La squadra che ha subito gol batte il calcio d'inizio
+        const nextKickoffTeam = (this.lastScoringTeam === 1) ? 2 : 1;
         this.resetKickoff(nextKickoffTeam);
       }
     }

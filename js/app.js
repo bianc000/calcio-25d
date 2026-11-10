@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.3';
-import { FootballGame } from './game.js?v=2.3';
-import { NetworkManager } from './network.js?v=2.3';
-import { sounds } from './audio.js?v=2.3';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.4';
+import { FootballGame } from './game.js?v=2.4';
+import { NetworkManager } from './network.js?v=2.4';
+import { sounds } from './audio.js?v=2.4';
 
 class App {
   constructor() {
@@ -183,6 +183,9 @@ class App {
         y: touch.clientY
       };
       stickKnob.style.transform = `translate(0px, 0px)`;
+      if (this.game) {
+        this.game.isKeyboardActive = false;
+      }
       e.preventDefault();
     };
 
@@ -203,6 +206,7 @@ class App {
       stickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
 
       // Normalizzazione vettori movimento
+      this.game.isKeyboardActive = false;
       this.game.input.moveX = knobX / maxRadius;
       this.game.input.moveZ = knobY / maxRadius;
 
@@ -241,7 +245,10 @@ class App {
     if (btnPass) {
       btnPass.addEventListener('touchstart', (e) => {
         btnPass.classList.add('active');
-        if (this.game) this.game.input.passTrigger = true;
+        if (this.game) {
+          this.game.input.passTrigger = true;
+          this.game.input.passBufferTimer = 0.5;
+        }
         sounds.playBeep(700, 0.04);
         e.preventDefault();
       }, { passive: false });
@@ -254,7 +261,7 @@ class App {
         btnShoot.classList.add('active');
         if (this.game) {
           this.game.input.isChargingShot = true;
-          this.game.input.shotPower = Math.max(this.game.input.shotPower, 0.45);
+          this.game.input.shotPower = Math.max(this.game.input.shotPower, 0.5);
           if (!this.game.userTeamHasBall()) {
             this.game.input.slideTrigger = true;
           }
@@ -263,22 +270,28 @@ class App {
         e.preventDefault();
       }, { passive: false });
 
-      btnShoot.addEventListener('touchend', (e) => {
+      const handleShootRelease = (e) => {
         btnShoot.classList.remove('active');
-        if (this.game && this.game.input.isChargingShot) {
+        if (this.game) {
           this.game.input.isChargingShot = false;
           this.game.input.shootTrigger = true;
-          this.game.input.shotBufferTimer = 0.45;
+          this.game.input.shotBufferTimer = 0.5;
         }
-        e.preventDefault();
-      }, { passive: false });
-      btnShoot.addEventListener('touchcancel', () => btnShoot.classList.remove('active'));
+        if (e && e.cancelable) e.preventDefault();
+      };
+
+      btnShoot.addEventListener('touchend', handleShootRelease, { passive: false });
+      btnShoot.addEventListener('touchcancel', handleShootRelease, { passive: false });
     }
 
     if (btnSwitch) {
       btnSwitch.addEventListener('touchstart', (e) => {
         btnSwitch.classList.add('active');
-        if (this.game) this.game.input.switchTrigger = true;
+        if (this.game) {
+          const myTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
+          this.game.switchActivePlayer(myTeam);
+          this.game.input.switchTrigger = true;
+        }
         sounds.playBeep(620, 0.03);
         e.preventDefault();
       }, { passive: false });
