@@ -1,6 +1,6 @@
 // Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js';
-import { sounds } from './audio.js';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.3';
+import { sounds } from './audio.js?v=2.3';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -364,12 +364,12 @@ export class FootballGame {
     const icon = (typeof charData === 'object' && charData.specialIcon) ? charData.specialIcon : '';
 
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = 512;
+    canvas.height = 128;
     const ctx = canvas.getContext('2d');
 
-    // Sfondo badge a capsula arrotondata (scuro semitrasparente ad alto contrasto)
-    const x = 12, y = 8, w = 232, h = 48, r = 24;
+    // Sfondo badge a capsula arrotondata ad altissima visibilità e contrasto
+    const x = 12, y = 12, w = 488, h = 104, r = 52;
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
@@ -381,58 +381,59 @@ export class FootballGame {
     ctx.lineTo(x, y + r);
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(8, 16, 28, 0.88)';
+    ctx.fillStyle = 'rgba(6, 12, 24, 0.94)';
     ctx.fill();
 
     const isTeam1 = (teamColor === 0xe74c3c);
+    const borderColor = isAraChar ? '#ffd700' : (isTeam1 ? '#ff3355' : '#00e5ff');
 
-    if (isAraChar) {
-      // Badge Oro speciale per Ara
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#ffd700';
-      ctx.stroke();
+    // Bordo con bagliore neon
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = borderColor;
+    ctx.shadowColor = borderColor;
+    ctx.shadowBlur = 12;
+    ctx.stroke();
 
-      ctx.beginPath();
-      ctx.arc(38, 32, 9, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffd700';
-      ctx.fill();
+    // Pallino / gemma identificativa sulla sinistra
+    ctx.beginPath();
+    ctx.arc(52, 64, 18, 0, Math.PI * 2);
+    ctx.fillStyle = borderColor;
+    ctx.shadowBlur = 16;
+    ctx.fill();
 
-      ctx.fillStyle = '#ffd700';
-      ctx.font = 'bold 28px "Rajdhani", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🦅 ARA 🦅', 142, 33);
-    } else {
-      // Bordo identificativo con colore della squadra
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = isTeam1 ? '#ff3838' : '#00f0ff';
-      ctx.stroke();
+    // Nome del giocatore con ruolo e icona distintiva
+    let displayName = icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
+    const charId = (typeof charData === 'object' && charData.id) ? charData.id : '';
+    if (charId === 'ara' || isAraChar) displayName = '🦅 ARA (FALCO)';
+    else if (charId === 'jona') displayName = '🦁 JONA (C)';
+    else if (charId === 'bubi') displayName = '🛡️ BUBI (VC)';
+    else if (charId === 'ento') displayName = '🟥 ENTO (ARB)';
+    else if (charId === 'lindi') displayName = '👑 LINDI (BOMBER)';
+    else if (charId === 'matti') displayName = '🧱 MATTI (MURO)';
+    else if (charId === 'jelmo') displayName = '⚡ JELMO (FLASH)';
+    else if (charId === 'roby') displayName = '🦷 ROBY (DENTISTA)';
+    else if (charId === 'lollo') displayName = '🍺 LOLLO (BIRRA)';
+    else if (charId === 'kri') displayName = '🐍 KRI (VIPER)';
+    else if (charId === 'leon') displayName = '🦁 LEON (LEONE)';
+    else if (charId === 'pibe') displayName = '🪄 PIBE (MAGO)';
 
-      // Pallino squadra a sinistra
-      ctx.beginPath();
-      ctx.arc(38, 32, 8, 0, Math.PI * 2);
-      ctx.fillStyle = isTeam1 ? '#ff3838' : '#00f0ff';
-      ctx.fill();
-
-      // Nome del giocatore in grassetto con icona abilità e ruolo
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 24px "Rajdhani", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      let displayName = icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
-      const charId = (typeof charData === 'object' && charData.id) ? charData.id : '';
-      if (charId === 'jona') displayName = '🦁 JONA (C)';
-      else if (charId === 'bubi') displayName = '🛡️ BUBI (VC)';
-      else if (charId === 'ento') displayName = '🟥 ENTO (ARBITRO)';
-      else if (charId === 'lindi') displayName = '👑 LINDI (BALLER)';
-      else if (charId === 'matti') displayName = '🧱 MATTI (MURO)';
-      else if (charId === 'jelmo') displayName = '⚡ JELMO (FLASH)';
-      else if (charId === 'roby') displayName = '🦷 ROBY (DENTISTA)';
-      else if (charId === 'lollo') displayName = '🍺 LOLLO (BIRRA)';
-
-      ctx.fillText(displayName, 142, 33);
+    // Calcolo dinamico dimensione font per non sbordare mai dalla capsula
+    let baseFontSize = isAraChar ? 46 : 42;
+    ctx.font = `900 ${baseFontSize}px "Rajdhani", "Arial Black", sans-serif`;
+    let measuredWidth = ctx.measureText(displayName).width;
+    if (measuredWidth > 380) {
+      baseFontSize = Math.floor(baseFontSize * (380 / measuredWidth));
+      ctx.font = `900 ${baseFontSize}px "Rajdhani", "Arial Black", sans-serif`;
     }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 3;
+    ctx.fillStyle = isAraChar ? '#ffd700' : '#ffffff';
+    ctx.fillText(displayName, 282, 66);
 
     const texture = new window.THREE.CanvasTexture(canvas);
     texture.minFilter = window.THREE.LinearFilter;
@@ -565,10 +566,10 @@ export class FootballGame {
     arrow.position.set(0, 0.05, 1.5 * scale);
     root.add(arrow);
 
-    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa
+    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa (grande e ultra-nitido)
     const nameTag = this.createNameTag(charData, teamColor, charData.id === 'ara');
-    nameTag.position.set(0, 3.1 * scale, 0);
-    nameTag.scale.set(3.4, 0.85, 1);
+    nameTag.position.set(0, 3.8 * scale, 0);
+    nameTag.scale.set(7.2, 1.8, 1);
     root.add(nameTag);
 
     return { root, ring, ringMat, arrow, arrowMat, nameTag, scale };
@@ -2266,15 +2267,15 @@ export class FootballGame {
       }
     }
 
-    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa
+    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (ben visibili e grandi)
     const activeIdx1 = this.activePlayerIdx1;
     this.playersTeam1.forEach((p, idx) => {
       const isActive = (idx === activeIdx1);
       p.ringMat.opacity = isActive ? 0.85 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
       if (p.nameTag) {
-        const sX = isActive ? 4.0 : 3.2;
-        const sY = isActive ? 1.0 : 0.8;
+        const sX = isActive ? 8.6 : 7.2;
+        const sY = isActive ? 2.15 : 1.8;
         p.nameTag.scale.set(sX, sY, 1);
       }
     });
@@ -2285,8 +2286,8 @@ export class FootballGame {
       p.ringMat.opacity = isActive ? 0.85 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
       if (p.nameTag) {
-        const sX = isActive ? 4.0 : 3.2;
-        const sY = isActive ? 1.0 : 0.8;
+        const sX = isActive ? 8.6 : 7.2;
+        const sY = isActive ? 2.15 : 1.8;
         p.nameTag.scale.set(sX, sY, 1);
       }
     });

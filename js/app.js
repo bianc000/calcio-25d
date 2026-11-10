@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js';
-import { FootballGame } from './game.js';
-import { NetworkManager } from './network.js';
-import { sounds } from './audio.js';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.3';
+import { FootballGame } from './game.js?v=2.3';
+import { NetworkManager } from './network.js?v=2.3';
+import { sounds } from './audio.js?v=2.3';
 
 class App {
   constructor() {
