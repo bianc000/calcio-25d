@@ -93,10 +93,10 @@ export class FootballGame {
     this.scene.background = new window.THREE.Color(0x131e29);
     this.scene.fog = new window.THREE.FogExp2(0x131e29, 0.007);
 
-    // Camera 2.5D Più ampia e panoramica per una visuale tattica
+    // Camera 2.5D Mario Strikers dinamica, cinematografica e ravvicinata
     this.camera = new window.THREE.PerspectiveCamera(46, width / height, 0.1, 1000);
-    this.camera.position.set(0, 52, 58);
-    this.camera.lookAt(0, 0, 0);
+    this.camera.position.set(0, 38, 46);
+    this.camera.lookAt(0, 1.2, 0);
 
     // Renderer
     this.renderer = new window.THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -368,12 +368,12 @@ export class FootballGame {
     const icon = (typeof charData === 'object' && charData.specialIcon) ? charData.specialIcon : '';
 
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 128;
+    canvas.width = 640;
+    canvas.height = 160;
     const ctx = canvas.getContext('2d');
 
     // Sfondo badge a capsula arrotondata ad altissima visibilità e contrasto
-    const x = 12, y = 12, w = 488, h = 104, r = 52;
+    const x = 16, y = 16, w = 608, h = 128, r = 64;
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
@@ -385,24 +385,24 @@ export class FootballGame {
     ctx.lineTo(x, y + r);
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(6, 12, 24, 0.94)';
+    ctx.fillStyle = 'rgba(6, 12, 24, 0.96)';
     ctx.fill();
 
     const isTeam1 = (teamColor === 0xe74c3c);
     const borderColor = isAraChar ? '#ffd700' : (isTeam1 ? '#ff3355' : '#00e5ff');
 
-    // Bordo con bagliore neon
-    ctx.lineWidth = 7;
+    // Bordo con bagliore neon ultra-visibile
+    ctx.lineWidth = 10;
     ctx.strokeStyle = borderColor;
     ctx.shadowColor = borderColor;
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = 18;
     ctx.stroke();
 
     // Pallino / gemma identificativa sulla sinistra
     ctx.beginPath();
-    ctx.arc(52, 64, 18, 0, Math.PI * 2);
+    ctx.arc(68, 80, 24, 0, Math.PI * 2);
     ctx.fillStyle = borderColor;
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = 20;
     ctx.fill();
 
     // Nome del giocatore con ruolo e icona distintiva
@@ -421,23 +421,23 @@ export class FootballGame {
     else if (charId === 'leon') displayName = '🦁 LEON (LEONE)';
     else if (charId === 'pibe') displayName = '🪄 PIBE (MAGO)';
 
-    // Calcolo dinamico dimensione font per non sbordare mai dalla capsula
-    let baseFontSize = isAraChar ? 46 : 42;
+    // Font grande, bold e nitido ad altissima visibilità
+    let baseFontSize = isAraChar ? 62 : 56;
     ctx.font = `900 ${baseFontSize}px "Rajdhani", "Arial Black", sans-serif`;
     let measuredWidth = ctx.measureText(displayName).width;
-    if (measuredWidth > 380) {
-      baseFontSize = Math.floor(baseFontSize * (380 / measuredWidth));
+    if (measuredWidth > 470) {
+      baseFontSize = Math.floor(baseFontSize * (470 / measuredWidth));
       ctx.font = `900 ${baseFontSize}px "Rajdhani", "Arial Black", sans-serif`;
     }
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 3;
+    ctx.shadowOffsetY = 4;
     ctx.fillStyle = isAraChar ? '#ffd700' : '#ffffff';
-    ctx.fillText(displayName, 282, 66);
+    ctx.fillText(displayName, 350, 82);
 
     const texture = new window.THREE.CanvasTexture(canvas);
     texture.minFilter = window.THREE.LinearFilter;
@@ -455,102 +455,116 @@ export class FootballGame {
     const root = new window.THREE.Group();
     const scale = charData.height || 1.0;
 
-    // 1. Corpo / Maglia
-    const torsoGeo = new window.THREE.CylinderGeometry(0.55 * scale, 0.45 * scale, 1.1 * scale, 16);
+    // 1. Torso Corazzato stile Mario Strikers (Ruby Red vs Electric Blue)
+    const torsoGeo = new window.THREE.CylinderGeometry(0.64 * scale, 0.48 * scale, 1.15 * scale, 16);
     const torsoMat = new window.THREE.MeshStandardMaterial({
       color: teamColor,
-      roughness: 0.4
+      roughness: 0.35,
+      metalness: 0.25
     });
     const torso = new window.THREE.Mesh(torsoGeo, torsoMat);
-    torso.position.y = 1.05 * scale;
+    torso.position.y = 1.08 * scale;
     torso.castShadow = true;
     root.add(torso);
 
-    // Pantaloncini
-    const shortsGeo = new window.THREE.CylinderGeometry(0.48 * scale, 0.45 * scale, 0.45 * scale, 16);
-    const shortsMat = new window.THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.5 });
+    // Spallacci corazzati stile Mario Strikers (Spalle larghe, atletiche e protette)
+    const shoulderMat = new window.THREE.MeshStandardMaterial({
+      color: (isCaptain || charData.id === 'jona' || charData.id === 'bubi') ? 0xffdd00 : teamColor,
+      roughness: 0.2,
+      metalness: 0.6
+    });
+    const leftPad = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.38 * scale, 0.24 * scale, 0.46 * scale), shoulderMat);
+    leftPad.position.set(-0.62 * scale, 1.45 * scale, 0);
+    leftPad.rotation.z = 0.25;
+    root.add(leftPad);
+
+    const rightPad = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.38 * scale, 0.24 * scale, 0.46 * scale), shoulderMat);
+    rightPad.position.set(0.62 * scale, 1.45 * scale, 0);
+    rightPad.rotation.z = -0.25;
+    root.add(rightPad);
+
+    // Dettaglio personalizzato: Mantello per Leon, Cartellino per Ento
+    if (charData.id === 'leon') {
+      const capeGeo = new window.THREE.PlaneGeometry(0.85 * scale, 1.1 * scale);
+      const capeMat = new window.THREE.MeshStandardMaterial({ color: 0x111118, side: window.THREE.DoubleSide });
+      const cape = new window.THREE.Mesh(capeGeo, capeMat);
+      cape.position.set(0, 0.95 * scale, -0.42 * scale);
+      cape.rotation.x = 0.2;
+      root.add(cape);
+    } else if (charData.id === 'ento') {
+      const cardGeo = new window.THREE.PlaneGeometry(0.22 * scale, 0.32 * scale);
+      const cardMat = new window.THREE.MeshBasicMaterial({ color: 0xff0033 });
+      const card = new window.THREE.Mesh(cardGeo, cardMat);
+      card.position.set(0.18 * scale, 1.25 * scale, 0.52 * scale);
+      root.add(card);
+    }
+
+    // Pantaloncini atletici
+    const shortsGeo = new window.THREE.CylinderGeometry(0.50 * scale, 0.44 * scale, 0.42 * scale, 16);
+    const shortsMat = new window.THREE.MeshStandardMaterial({ color: 0x111625, roughness: 0.5 });
     const shorts = new window.THREE.Mesh(shortsGeo, shortsMat);
-    shorts.position.y = 0.55 * scale;
+    shorts.position.y = 0.58 * scale;
     shorts.castShadow = true;
     root.add(shorts);
 
-    // 2. Testa
-    const headGeo = new window.THREE.SphereGeometry(0.48 * scale, 16, 16);
-    const skinHex = parseInt(charData.skinColor.replace('#', '0x')) || 0xf1c27d;
-    const headMat = new window.THREE.MeshStandardMaterial({ color: skinHex, roughness: 0.7 });
-    const head = new window.THREE.Mesh(headGeo, headMat);
-    head.position.y = 1.95 * scale;
-    head.castShadow = true;
-    root.add(head);
+    // Gambe & Scarpini con tacchetti (Mario Strikers Cleats)
+    const bootMat = new window.THREE.MeshStandardMaterial({ color: 0x050810, roughness: 0.3, metalness: 0.4 });
+    const sockMat = new window.THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.5 });
 
-    // 2b. Sprite Volto Foto Personalizzato (per Ara e avatar speciali)
-    if (charData.id === 'ara' || charData.avatar) {
-      const loader = new window.THREE.TextureLoader();
-      const faceTex = loader.load(charData.avatar || 'assets/ara_avatar.png');
-      const faceMat = new window.THREE.SpriteMaterial({
-        map: faceTex,
-        transparent: true,
-        depthTest: true
-      });
-      const faceSprite = new window.THREE.Sprite(faceMat);
-      faceSprite.position.set(0, 2.05 * scale, 0);
-      faceSprite.scale.set(1.45 * scale, 1.45 * scale, 1);
-      root.add(faceSprite);
-    }
+    [-0.24 * scale, 0.24 * scale].forEach(legX => {
+      const sock = new window.THREE.Mesh(new window.THREE.CylinderGeometry(0.14 * scale, 0.12 * scale, 0.42 * scale, 10), sockMat);
+      sock.position.set(legX, 0.28 * scale, 0);
+      root.add(sock);
 
-    // 3. Capelli personalizzati
-    const hairHex = parseInt(charData.hairColor.replace('#', '0x')) || 0x222222;
-    const hairMat = new window.THREE.MeshStandardMaterial({ color: hairHex, roughness: 0.9 });
+      const boot = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.24 * scale, 0.16 * scale, 0.42 * scale), bootMat);
+      boot.position.set(legX, 0.08 * scale, 0.08 * scale);
+      root.add(boot);
+    });
 
-    if (charData.hairStyle === 'afro') {
-      const afroGeo = new window.THREE.SphereGeometry(0.58 * scale, 16, 16);
-      const afro = new window.THREE.Mesh(afroGeo, hairMat);
-      afro.position.set(0, 2.05 * scale, -0.05);
-      root.add(afro);
-    } else if (charData.hairStyle === 'mohawk') {
-      const hawkGeo = new window.THREE.BoxGeometry(0.18 * scale, 0.4 * scale, 0.7 * scale);
-      const hawk = new window.THREE.Mesh(hawkGeo, hairMat);
-      hawk.position.set(0, 2.4 * scale, 0);
-      root.add(hawk);
-    } else if (charData.hairStyle === 'ponytail') {
-      const hairGeo = new window.THREE.SphereGeometry(0.49 * scale, 14, 14);
-      const hair = new window.THREE.Mesh(hairGeo, hairMat);
-      hair.position.set(0, 2.02 * scale, 0);
-      root.add(hair);
-      const tailGeo = new window.THREE.CylinderGeometry(0.15 * scale, 0.05 * scale, 0.6 * scale, 8);
-      const tail = new window.THREE.Mesh(tailGeo, hairMat);
-      tail.position.set(0, 1.85 * scale, -0.5 * scale);
-      tail.rotation.x = -Math.PI / 3;
-      root.add(tail);
-    } else {
-      // Standard / Spiky / Buzz
-      const hairGeo = new window.THREE.CylinderGeometry(0.52 * scale, 0.5 * scale, 0.28 * scale, 14);
-      const hair = new window.THREE.Mesh(hairGeo, hairMat);
-      hair.position.y = 2.22 * scale;
-      root.add(hair);
-    }
+    // Supporto atletico del collo
+    const neckGeo = new window.THREE.CylinderGeometry(0.24 * scale, 0.28 * scale, 0.35 * scale, 12);
+    const neckMat = new window.THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.6 });
+    const neck = new window.THREE.Mesh(neckGeo, neckMat);
+    neck.position.y = 1.65 * scale;
+    root.add(neck);
 
-    // Fascia Capitano (Jona) o Vice Capitano (Bubi)
+    // 2. VERO VOLTO FOTOGRAFICO IN-GAME (Stile Mario Strikers / Bobblehead)
+    // Mostra la reale foto dell'amico sempre rivolta alla telecamera con grandissima definizione
+    const loader = new window.THREE.TextureLoader();
+    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=2.5`;
+    const faceTex = loader.load(avatarPath);
+    const faceMat = new window.THREE.SpriteMaterial({
+      map: faceTex,
+      transparent: true,
+      depthTest: false // Sempre in primo piano e visibile al 100%
+    });
+    const faceSprite = new window.THREE.Sprite(faceMat);
+    faceSprite.position.set(0, 2.38 * scale, 0);
+    faceSprite.scale.set(2.45 * scale, 2.45 * scale, 1);
+    faceSprite.renderOrder = 950;
+    root.add(faceSprite);
+
+    // Fascia Capitano (Jona) o Vice Capitano (Bubi) al braccio
     const isCap = isCaptain || charData.id === 'jona';
     const isViceCap = charData.id === 'bubi';
-    if (charData.hairStyle === 'headband' || isCap || isViceCap) {
-      const bandGeo = new window.THREE.CylinderGeometry(0.5 * scale, 0.5 * scale, 0.12 * scale, 16);
-      const bandMat = new window.THREE.MeshBasicMaterial({ color: isCap ? 0xffdd00 : (isViceCap ? 0xcccccc : 0xffdd00) });
-      const band = new window.THREE.Mesh(bandGeo, bandMat);
-      band.position.y = 2.05 * scale;
-      root.add(band);
+    if (isCap || isViceCap) {
+      const armBandGeo = new window.THREE.CylinderGeometry(0.16 * scale, 0.16 * scale, 0.14 * scale, 12);
+      const armBandMat = new window.THREE.MeshBasicMaterial({ color: isCap ? 0xffdd00 : 0x00e5ff });
+      const armBand = new window.THREE.Mesh(armBandGeo, armBandMat);
+      armBand.position.set(-0.70 * scale, 1.25 * scale, 0);
+      root.add(armBand);
     }
 
     // 4. Ombra a terra del giocatore
-    const shadowGeo = new window.THREE.CircleGeometry(0.75 * scale, 16);
+    const shadowGeo = new window.THREE.CircleGeometry(0.85 * scale, 16);
     const shadowMat = new window.THREE.MeshBasicMaterial({ color: 0x051206, transparent: true, opacity: 0.5 });
     const shadow = new window.THREE.Mesh(shadowGeo, shadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.01;
     root.add(shadow);
 
-    // 5. Anello di selezione (indicatore sotto i piedi per il giocatore attivo)
-    const ringGeo = new window.THREE.RingGeometry(0.85 * scale, 1.15 * scale, 32);
+    // 5. Anello di selezione luminoso sotto i piedi
+    const ringGeo = new window.THREE.RingGeometry(0.95 * scale, 1.25 * scale, 32);
     const ringMat = new window.THREE.MeshBasicMaterial({
       color: 0xffee00,
       side: window.THREE.DoubleSide,
@@ -567,13 +581,13 @@ export class FootballGame {
     const arrowMat = new window.THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
     const arrow = new window.THREE.Mesh(arrowGeo, arrowMat);
     arrow.rotation.x = Math.PI / 2;
-    arrow.position.set(0, 0.05, 1.5 * scale);
+    arrow.position.set(0, 0.05, 1.6 * scale);
     root.add(arrow);
 
-    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa (grande e ultra-nitido)
+    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa (grande e ultra-visibile)
     const nameTag = this.createNameTag(charData, teamColor, charData.id === 'ara');
-    nameTag.position.set(0, 3.8 * scale, 0);
-    nameTag.scale.set(7.2, 1.8, 1);
+    nameTag.position.set(0, 4.3 * scale, 0);
+    nameTag.scale.set(13.5, 3.4, 1);
     root.add(nameTag);
 
     return { root, ring, ringMat, arrow, arrowMat, nameTag, scale };
@@ -712,23 +726,28 @@ export class FootballGame {
         e.preventDefault();
       }
 
-      // Tasti di Passaggio: Z, J, B
+      // Tasti di Passaggio secondari: Z, J, B
       if (e.code === 'KeyZ' || e.code === 'KeyJ' || e.code === 'KeyB') {
         this.input.passTrigger = true;
         this.input.passBufferTimer = 0.5;
+        e.preventDefault();
+        return;
       }
 
-      // Spazio: se la nostra squadra ha la palla, TIRO! Altrimenti cambia giocatore attivo!
+      // SPAZIO:
+      // In possesso palla -> PASSA al compagno migliore!
+      // Senza palla / in difesa -> CAMBIA GIOCATORE ATTIVO al più vicino al pallone!
       if (e.code === 'Space') {
         if (this.userTeamHasBall()) {
-          this.input.isChargingShot = true;
-          this.input.shotPower = Math.max(this.input.shotPower, 0.45);
+          this.input.passTrigger = true;
+          this.input.passBufferTimer = 0.5;
         } else {
           const myTeam = this.options.isClient ? 2 : 1;
           this.switchActivePlayer(myTeam);
           this.input.switchTrigger = true;
         }
         e.preventDefault();
+        return;
       }
 
       // Q: sempre cambio giocatore manuale
@@ -737,27 +756,31 @@ export class FootballGame {
         this.switchActivePlayer(myTeam);
         this.input.switchTrigger = true;
         e.preventDefault();
+        return;
       }
 
-      // Se premi uno dei tasti di tiro (X, K, C, V, Invio)
-      const isShootKey = (e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV' || e.code === 'Enter');
+      // INVIO (Enter, NumpadEnter) o tasti secondari (KeyX, KeyK, KeyC, KeyV):
+      // In possesso palla -> TIRO (carica tenendo premuto, calcia al rilascio)!
+      // Senza palla / in difesa -> SCIVOLATA / CONTRASTO FISICO (Mario Strikers Body Check)!
+      const isShootKey = (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV');
       if (isShootKey) {
-        this.input.isChargingShot = true;
-        this.input.shotPower = Math.max(this.input.shotPower, 0.45);
-
-        // Se non abbiamo palla e siamo lontani, tenta scivolata
-        if (!this.userTeamHasBall()) {
+        if (this.userTeamHasBall()) {
+          this.input.isChargingShot = true;
+          this.input.shotPower = Math.max(this.input.shotPower, 0.45);
+        } else {
           this.input.slideTrigger = true;
         }
+        e.preventDefault();
+        return;
       }
     });
 
     window.addEventListener('keyup', (e) => {
       this.keysDown[e.code] = false;
 
-      const isShootKey = (e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV' || e.code === 'Enter' || e.code === 'Space');
+      const isShootKey = (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV');
 
-      // Rilascio del tasto di tiro: spara immediatamente il tiro!
+      // Rilascio del tasto di tiro: scaglia il tiro in porta!
       if (isShootKey && this.input.isChargingShot) {
         this.input.isChargingShot = false;
         this.input.shootTrigger = true;
@@ -2319,37 +2342,40 @@ export class FootballGame {
       }
     }
 
-    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (ben visibili e grandi)
+    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (grandi, nitidi ed ultra-visibili)
     const activeIdx1 = this.activePlayerIdx1;
     this.playersTeam1.forEach((p, idx) => {
       const isActive = (idx === activeIdx1);
-      p.ringMat.opacity = isActive ? 0.85 : 0;
+      p.ringMat.opacity = isActive ? 0.9 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
       if (p.nameTag) {
-        const sX = isActive ? 8.6 : 7.2;
-        const sY = isActive ? 2.15 : 1.8;
+        const sX = isActive ? 16.5 : 13.5;
+        const sY = isActive ? 4.1 : 3.35;
         p.nameTag.scale.set(sX, sY, 1);
+        p.nameTag.position.y = 4.3 * p.scale;
       }
     });
 
     const activeIdx2 = this.activePlayerIdx2;
     this.playersTeam2.forEach((p, idx) => {
       const isActive = (idx === activeIdx2);
-      p.ringMat.opacity = isActive ? 0.85 : 0;
+      p.ringMat.opacity = isActive ? 0.9 : 0;
       p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
       if (p.nameTag) {
-        const sX = isActive ? 8.6 : 7.2;
-        const sY = isActive ? 2.15 : 1.8;
+        const sX = isActive ? 16.5 : 13.5;
+        const sY = isActive ? 4.1 : 3.35;
         p.nameTag.scale.set(sX, sY, 1);
+        p.nameTag.position.y = 4.3 * p.scale;
       }
     });
 
-    // 4. Telecamera dinamica 2.5D (insegue dolcemente la palla con visuale panoramica chiara)
-    const targetCamX = this.ball.x * 0.35;
-    const targetCamZ = this.ball.z * 0.28 + 50;
-    this.camera.position.x += (targetCamX - this.camera.position.x) * 3.0 * dt;
-    this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.0 * dt;
-    this.camera.lookAt(this.ball.x * 0.35, 0, this.ball.z * 0.28);
+    // 4. Telecamera dinamica 2.5D Mario Strikers (insegue la palla con visuale ravvicinata e adrenalinica)
+    const targetCamX = this.ball.x * 0.45;
+    const targetCamZ = this.ball.z * 0.38 + 38;
+    this.camera.position.x += (targetCamX - this.camera.position.x) * 3.5 * dt;
+    this.camera.position.y += (38 - this.camera.position.y) * 2.5 * dt;
+    this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.5 * dt;
+    this.camera.lookAt(this.ball.x * 0.45, 1.2, this.ball.z * 0.35);
 
     // Applicazione Camera Shake per impatto arcade
     if (this.cameraShake > 0.01) {

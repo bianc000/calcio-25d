@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.4';
-import { FootballGame } from './game.js?v=2.4';
-import { NetworkManager } from './network.js?v=2.4';
-import { sounds } from './audio.js?v=2.4';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.5';
+import { FootballGame } from './game.js?v=2.5';
+import { NetworkManager } from './network.js?v=2.5';
+import { sounds } from './audio.js?v=2.5';
 
 class App {
   constructor() {
@@ -246,8 +246,14 @@ class App {
       btnPass.addEventListener('touchstart', (e) => {
         btnPass.classList.add('active');
         if (this.game) {
-          this.game.input.passTrigger = true;
-          this.game.input.passBufferTimer = 0.5;
+          if (this.game.userTeamHasBall()) {
+            this.game.input.passTrigger = true;
+            this.game.input.passBufferTimer = 0.5;
+          } else {
+            const myTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
+            this.game.switchActivePlayer(myTeam);
+            this.game.input.switchTrigger = true;
+          }
         }
         sounds.playBeep(700, 0.04);
         e.preventDefault();
@@ -745,7 +751,22 @@ class App {
       touchSpecialBtn.classList.toggle('ready', myTeamMeter >= 100);
     }
 
-    // Aggiorna etichetta dinamica pulsante azione touch (TIRO in attacco / TACKLE in difesa)
+    // Aggiorna etichette dinamiche pulsanti touch Mario Strikers
+    const touchPassBtn = document.getElementById('touch-pass');
+    if (touchPassBtn) {
+      const icon = touchPassBtn.querySelector('.btn-icon');
+      const label = touchPassBtn.querySelector('.btn-label');
+      if (icon && label) {
+        if (hudData.hasBall) {
+          icon.innerText = '👟';
+          label.innerText = 'PASSA';
+        } else {
+          icon.innerText = '🔄';
+          label.innerText = 'CAMBIA';
+        }
+      }
+    }
+
     const touchShootBtn = document.getElementById('touch-shoot');
     if (touchShootBtn) {
       const icon = touchShootBtn.querySelector('.btn-icon');
@@ -753,10 +774,10 @@ class App {
       if (icon && label) {
         if (hudData.hasBall) {
           icon.innerText = '⚽';
-          label.innerText = 'TIRO';
+          label.innerText = 'TIRA';
         } else {
-          icon.innerText = '🛡️';
-          label.innerText = 'TACKLE';
+          icon.innerText = '⚡';
+          label.innerText = 'SCIVOLA';
         }
       }
     }
