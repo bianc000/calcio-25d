@@ -334,7 +334,11 @@ export class FootballGame {
     };
   }
 
-  createNameTag(name, teamColor, isAra = false) {
+  createNameTag(charData, teamColor, isAra = false) {
+    const name = (typeof charData === 'string') ? charData : (charData.name || '');
+    const isAraChar = isAra || (typeof charData === 'object' && charData.id === 'ara') || (name.toUpperCase() === 'ARA');
+    const icon = (typeof charData === 'object' && charData.specialIcon) ? charData.specialIcon : '';
+
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 64;
@@ -358,7 +362,7 @@ export class FootballGame {
 
     const isTeam1 = (teamColor === 0xe74c3c);
 
-    if (isAra) {
+    if (isAraChar) {
       // Badge Oro speciale per Ara
       ctx.lineWidth = 4;
       ctx.strokeStyle = '#ffd700';
@@ -386,12 +390,13 @@ export class FootballGame {
       ctx.fillStyle = isTeam1 ? '#ff3838' : '#00f0ff';
       ctx.fill();
 
-      // Nome del giocatore in grassetto ad alta visibilità
+      // Nome del giocatore in grassetto con icona abilità
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 30px "Rajdhani", sans-serif';
+      ctx.font = 'bold 28px "Rajdhani", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(name.toUpperCase(), 142, 33);
+      const displayName = icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
+      ctx.fillText(displayName, 142, 33);
     }
 
     const texture = new window.THREE.CanvasTexture(canvas);
@@ -524,7 +529,7 @@ export class FootballGame {
     root.add(arrow);
 
     // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa
-    const nameTag = this.createNameTag(charData.name, teamColor, charData.id === 'ara');
+    const nameTag = this.createNameTag(charData, teamColor, charData.id === 'ara');
     nameTag.position.set(0, 3.1 * scale, 0);
     nameTag.scale.set(3.4, 0.85, 1);
     root.add(nameTag);
