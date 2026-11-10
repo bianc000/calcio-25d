@@ -731,6 +731,22 @@ class App {
       touchSpecialBtn.classList.toggle('ready', myTeamMeter >= 100);
     }
 
+    // Aggiorna etichetta dinamica pulsante azione touch (TIRO in attacco / TACKLE in difesa)
+    const touchShootBtn = document.getElementById('touch-shoot');
+    if (touchShootBtn) {
+      const icon = touchShootBtn.querySelector('.btn-icon');
+      const label = touchShootBtn.querySelector('.btn-label');
+      if (icon && label) {
+        if (hudData.hasBall) {
+          icon.innerText = '⚽';
+          label.innerText = 'TIRO';
+        } else {
+          icon.innerText = '🛡️';
+          label.innerText = 'TACKLE';
+        }
+      }
+    }
+
     // Barra di caricamento tiro
     if (hudData.shotPower > 0.05) {
       this.shotPowerContainer.style.display = 'block';

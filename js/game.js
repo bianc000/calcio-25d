@@ -34,6 +34,9 @@ export class FootballGame {
     this.goalShieldTimer = 0;
     this.goalShieldTeam = 0;
 
+    // Impatto visivo Camera Shake dinamico
+    this.cameraShake = 0;
+
     // Input locale
     this.input = {
       moveX: 0,
@@ -313,6 +316,21 @@ export class FootballGame {
     this.ballShadow.position.y = 0.02;
     this.scene.add(this.ballShadow);
 
+    // Scia di velocità e fiamme stile Mario Strikers (Ball Speed Trail)
+    this.ballTrail = [];
+    const trailGeo = new window.THREE.SphereGeometry(ballRadius * 0.72, 12, 12);
+    for (let i = 0; i < 6; i++) {
+      const trailMat = new window.THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        transparent: true,
+        opacity: 0
+      });
+      const trailMesh = new window.THREE.Mesh(trailGeo, trailMat);
+      trailMesh.visible = false;
+      this.scene.add(trailMesh);
+      this.ballTrail.push({ mesh: trailMesh, mat: trailMat });
+    }
+
     // Dati fisici palla
     this.ball = {
       x: 0,
@@ -321,6 +339,7 @@ export class FootballGame {
       vx: 0,
       vy: 0,
       vz: 0,
+      spinZ: 0, // Effetto a rientrare / curva (Tiro a Giro)
       radius: ballRadius,
       rotX: 0,
       rotZ: 0,
@@ -332,6 +351,11 @@ export class FootballGame {
       specialType: null,
       specialShooter: null
     };
+  }
+
+  // Aggiunge camera shake dinamico per dare impatto a tiri, spallate e gol
+  addCameraShake(intensity) {
+    this.cameraShake = Math.min(2.5, this.cameraShake + intensity);
   }
 
   createNameTag(charData, teamColor, isAra = false) {
@@ -756,6 +780,7 @@ export class FootballGame {
     this.ball.vx = 0;
     this.ball.vy = 0;
     this.ball.vz = 0;
+    this.ball.spinZ = 0;
     this.ball.holder = null;
     this.ball.lastPossessor = null;
     this.ball.lastKicker = null;
@@ -920,8 +945,42 @@ export class FootballGame {
       return;
     }
 
-    // Trigger scivolata difensiva
+    // Trigger contrasto: Spallata fisica (Mario Strikers Body Check) da vicino o Scivolata in corsa
     if (inputData.slideTrigger && !p.isSliding) {
+      const enemyCarrier = (this.ball.holder && this.ball.holder.team !== p.team) ? this.ball.holder : null;
+      const distToCarrier = enemyCarrier ? Math.hypot(p.x - enemyCarrier.x, p.z - enemyCarrier.z) : 999;
+
+      if (enemyCarrier && distToCarrier < 2.0 * p.scale && p.tackleCooldown <= 0) {
+        // SPALLATA FISICA / BODY CHECK DEVASTANTE!
+        sounds.playBodyCheck();
+        this.addCameraShake(0.85);
+
+        enemyCarrier.protectionTimer = 0;
+        enemyCarrier.cannotPickupTimer = 0.65;
+        enemyCarrier.possessionTime = 0;
+        enemyCarrier.tackleCooldown = 0.8;
+        this.ball.holder = null;
+        this.ball.lastKicker = p;
+        this.chargeMeter(p.team, 16);
+
+        const shoveDirX = Math.sign(enemyCarrier.x - p.x || (p.team === 1 ? 1 : -1));
+        const shoveDirZ = Math.sign(enemyCarrier.z - p.z || 1);
+        enemyCarrier.vx = shoveDirX * 13;
+        enemyCarrier.vz = shoveDirZ * 7;
+        enemyCarrier.isSliding = true;
+        enemyCarrier.slideTimer = 0.55;
+
+        this.ball.vx = shoveDirX * 14 + (Math.random() - 0.5) * 5;
+        this.ball.vz = shoveDirZ * 8;
+        this.ball.vy = 2.6;
+
+        p.cannotPickupTimer = 0.18;
+        p.tackleCooldown = 0.7;
+        inputData.slideTrigger = false;
+        return;
+      }
+
+      // Altrimenti classica scivolata difensiva
       p.isSliding = true;
       p.slideTimer = 0.45;
       const slideSpeed = currentMaxSpeed * 1.4;
@@ -1017,11 +1076,14 @@ export class FootballGame {
     if (this.ball.holder === p) {
       p.possessionTime += dt;
 
-      // La palla segue il giocatore davanti ai suoi piedi
-      const ballOffsetDist = 0.95 * p.scale;
-      this.ball.x = p.x + Math.sin(p.rot) * ballOffsetDist;
-      this.ball.z = p.z + Math.cos(p.rot) * ballOffsetDist;
-      this.ball.y = this.ball.radius;
+      // Conduzione palla organica e fluida con allungo palla in scatto (Sprint Knock-on)
+      const leadDist = inputData.sprint ? (1.55 * p.scale) : (0.95 * p.scale);
+      const targetBallX = p.x + Math.sin(p.rot) * leadDist;
+      const targetBallZ = p.z + Math.cos(p.rot) * leadDist;
+
+      this.ball.x += (targetBallX - this.ball.x) * 22 * dt;
+      this.ball.z += (targetBallZ - this.ball.z) * 22 * dt;
+      this.ball.y = this.ball.radius + Math.abs(Math.sin(performance.now() * 0.018)) * 0.12;
       this.ball.vx = p.vx;
       this.ball.vz = p.vz;
       this.ball.vy = 0;
@@ -1036,18 +1098,35 @@ export class FootballGame {
 
       if (triggerShoot) {
         const shotPowerNorm = Math.max(0.45, inputData.shotPower || 0.7);
-        const powerMult = 20 + (stats.shot / 100) * 14;
+        const powerMult = 21 + (stats.shot / 100) * 15;
         const finalSpeed = shotPowerNorm * powerMult;
 
-        // Direzione tiro verso la porta avversaria con influenza direzionale dello stick
+        // Mira SEMPRE verso la porta avversaria (niente tiri all'indietro!)
         const targetGoalX = (p.team === 1) ? this.FIELD_W / 2 : -this.FIELD_W / 2;
-        let shootAngle = Math.atan2(targetGoalX - p.x, -p.z);
-        if (inputData.moveX !== 0 || inputData.moveZ !== 0) {
-          shootAngle = p.rot;
+
+        // Mira manuale dell'angolo con stick / frecce Su/Giù:
+        let targetGoalZ = 0;
+        if (inputData.moveZ < -0.15) {
+          targetGoalZ = -this.GOAL_W / 2 + 1.0; // Incrocia all'angolino alto
+        } else if (inputData.moveZ > 0.15) {
+          targetGoalZ = this.GOAL_W / 2 - 1.0;  // Incrocia all'angolino basso
+        } else {
+          // Se dritto, piazza sul secondo palo aperto
+          targetGoalZ = (p.z > 0) ? (-this.GOAL_W / 2 + 1.2) : (this.GOAL_W / 2 - 1.2);
         }
 
-        const forwardX = Math.sin(shootAngle);
-        const forwardZ = Math.cos(shootAngle);
+        const dirX = targetGoalX - p.x;
+        const dirZ = targetGoalZ - p.z;
+        const distToGoal = Math.hypot(dirX, dirZ) || 1;
+        const forwardX = dirX / distToGoal;
+        const forwardZ = dirZ / distToGoal;
+
+        // Effetto a girare (spin Z) se il giocatore imprime inclinazione durante il tiro (Tiro a Giro / Curva)
+        let spin = 0;
+        if (Math.abs(inputData.moveZ) > 0.2) {
+          spin = Math.sign(inputData.moveZ) * (p.team === 1 ? -1 : 1) * 7.5;
+        }
+        this.ball.spinZ = spin;
 
         // 1. Libera immediatamente il possesso e attiva cooldown al tiratore per non farlo riagganciare
         this.ball.holder = null;
@@ -1058,19 +1137,21 @@ export class FootballGame {
         p.possessionTime = 0;
 
         // 2. Proietta la palla davanti al tiratore fuori dalla portata dei piedi
-        this.ball.x = p.x + forwardX * (1.3 * p.scale);
-        this.ball.z = p.z + forwardZ * (1.3 * p.scale);
-        this.ball.y = this.ball.radius + 0.35;
+        this.ball.x = p.x + forwardX * (1.35 * p.scale);
+        this.ball.z = p.z + forwardZ * (1.35 * p.scale);
+        this.ball.y = this.ball.radius + 0.3;
 
         this.ball.vx = forwardX * finalSpeed;
         this.ball.vz = forwardZ * finalSpeed;
-        this.ball.vy = 3.6 + shotPowerNorm * 5.0; // Parabola aerea visibile
+        // Parabola calibrata: rasoterra pungente se tocco rapido, bolide aereo se caricato
+        this.ball.vy = 2.0 + shotPowerNorm * 5.2;
 
         this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
         this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
 
         if (shotPowerNorm > 0.75) {
           sounds.playPowerShot();
+          this.addCameraShake(0.65);
         } else {
           sounds.playKick(shotPowerNorm);
         }
@@ -1080,7 +1161,7 @@ export class FootballGame {
         inputData.shotPower = 0;
         inputData.isChargingShot = false;
       }
-      // Esegui passaggio corto o filtrante
+      // Esegui passaggio corto o filtrante / cross
       else if (inputData.passTrigger) {
         const teammates = (p.team === 1) ? this.playersTeam1 : this.playersTeam2;
         const otherTeammates = teammates.filter(mate => mate !== p);
@@ -1106,28 +1187,38 @@ export class FootballGame {
         const dist = Math.hypot(dx, dz) || 1;
         const passDirX = dx / dist;
         const passDirZ = dz / dist;
-        const passSpeed = Math.min(26, Math.max(14, dist * 1.25));
+        const passSpeed = Math.min(27, Math.max(15, dist * 1.3));
+
+        // Cross morbido aereo / pallonetto se si tiene premuto sprint o a grande distanza
+        const isLob = inputData.sprint || dist > 14;
 
         // 1. Libera immediatamente il possesso e attiva cooldown al passatore
         this.ball.holder = null;
         this.ball.lastKicker = p;
         this.chargeMeter(p.team, 10);
-        p.cannotPickupTimer = 0.5;
+        p.cannotPickupTimer = 0.45;
         p.possessionTime = 0;
 
         // 2. Proietta la palla davanti al passatore verso il compagno
-        this.ball.x = p.x + passDirX * (1.2 * p.scale);
-        this.ball.z = p.z + passDirZ * (1.2 * p.scale);
-        this.ball.y = this.ball.radius + 0.15;
+        this.ball.x = p.x + passDirX * (1.25 * p.scale);
+        this.ball.z = p.z + passDirZ * (1.25 * p.scale);
+        this.ball.y = this.ball.radius + 0.2;
 
-        this.ball.vx = passDirX * passSpeed;
-        this.ball.vz = passDirZ * passSpeed;
-        this.ball.vy = 1.0;
+        if (isLob) {
+          this.ball.vx = passDirX * passSpeed * 0.95;
+          this.ball.vz = passDirZ * passSpeed * 0.95;
+          this.ball.vy = 5.2 + Math.min(2.5, dist * 0.08); // Parabola aerea per cross morbido
+          sounds.playVolley();
+        } else {
+          this.ball.vx = passDirX * passSpeed;
+          this.ball.vz = passDirZ * passSpeed;
+          this.ball.vy = 0.8;
+          sounds.playKick(0.7);
+        }
 
         this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
         this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
 
-        sounds.playKick(0.7);
         inputData.passTrigger = false;
 
         // Auto-switch immediato al ricevitore se il passaggio è della squadra utente
@@ -1144,34 +1235,47 @@ export class FootballGame {
       p.possessionTime = 0;
       const distToBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
 
-      // TIRO DI PRIMA: se il giocatore umano è vicino alla palla (< 2.5m) e ha premuto tiro, calcia direttamente al volo
+      // TIRO DI PRIMA O TIRO AL VOLO / ROVESCIATA:
+      // Se il giocatore umano è vicino alla palla (< 2.6m) e ha premuto tiro
       const triggerFirstTime = (inputData.shootTrigger || (inputData.shotBufferTimer && inputData.shotBufferTimer > 0));
-      if (triggerFirstTime && distToBall < 2.5 * p.scale && !this.ball.holder && isHuman && (!p.cannotPickupTimer || p.cannotPickupTimer <= 0)) {
-        const shotPowerNorm = Math.max(0.45, inputData.shotPower || 0.7);
-        const powerMult = 20 + (stats.shot / 100) * 14;
-        const finalSpeed = shotPowerNorm * powerMult;
+      if (triggerFirstTime && distToBall < 2.6 * p.scale && !this.ball.holder && isHuman && (!p.cannotPickupTimer || p.cannotPickupTimer <= 0)) {
+        const isAerial = (this.ball.y > 0.85);
+        const shotPowerNorm = Math.max(0.5, inputData.shotPower || 0.75);
 
         const targetGoalX = (p.team === 1) ? this.FIELD_W / 2 : -this.FIELD_W / 2;
-        let shootAngle = Math.atan2(targetGoalX - p.x, -p.z);
-        if (inputData.moveX !== 0 || inputData.moveZ !== 0) {
-          shootAngle = p.rot;
-        }
+        let targetGoalZ = (inputData.moveZ < -0.15) ? -4.5 : ((inputData.moveZ > 0.15) ? 4.5 : 0);
+        const dirX = targetGoalX - p.x;
+        const dirZ = targetGoalZ - p.z;
+        const distToGoal = Math.hypot(dirX, dirZ) || 1;
+        const forwardX = dirX / distToGoal;
+        const forwardZ = dirZ / distToGoal;
 
-        const forwardX = Math.sin(shootAngle);
-        const forwardZ = Math.cos(shootAngle);
-
-        p.cannotPickupTimer = 0.45;
+        p.cannotPickupTimer = 0.5;
         this.ball.lastShooter = p;
         this.ball.lastKicker = p;
-        this.chargeMeter(p.team, 12);
+        this.chargeMeter(p.team, 15);
 
-        this.ball.x += forwardX * 0.8;
-        this.ball.z += forwardZ * 0.8;
-        this.ball.vx = forwardX * finalSpeed;
-        this.ball.vz = forwardZ * finalSpeed;
-        this.ball.vy = 3.8 + shotPowerNorm * 4.8;
+        if (isAerial) {
+          // TIRO AL VOLO / INCORNATA / ROVESCIATA SPETTACOLARE!
+          const volleySpeed = (25 + (stats.shot / 100) * 16) * 1.35;
+          this.ball.vx = forwardX * volleySpeed;
+          this.ball.vz = forwardZ * volleySpeed;
+          this.ball.vy = 1.4; // Siluro teso
+          this.ball.spinZ = (Math.random() - 0.5) * 8.0;
 
-        sounds.playKick(shotPowerNorm);
+          p.mesh.position.y = 1.25 * p.scale;
+          p.mesh.rotation.x = -Math.PI / 2.6; // Inclinazione acrobatica
+          sounds.playVolley();
+          this.addCameraShake(1.15);
+        } else {
+          // Tiro di prima rasoterra calibrato
+          const groundSpeed = (20 + (stats.shot / 100) * 14) * shotPowerNorm;
+          this.ball.vx = forwardX * groundSpeed;
+          this.ball.vz = forwardZ * groundSpeed;
+          this.ball.vy = 2.4 + shotPowerNorm * 3.6;
+          sounds.playKick(shotPowerNorm);
+          this.addCameraShake(0.5);
+        }
 
         inputData.shootTrigger = false;
         inputData.shotBufferTimer = 0;
@@ -1300,12 +1404,58 @@ export class FootballGame {
           }
         }
       } else {
-        // CPU avversaria su palla vagante:
+        // CPU avversaria su palla vagante o tiro in arrivo:
         if (p.role === 'gk') {
-          // Portiere difende l'area di rigore
-          const idealX = ownGoalX + (p.team === 1 ? 5.5 : -5.5);
-          const idealZ = Math.max(-this.GOAL_W / 2 + 1, Math.min(this.GOAL_W / 2 - 1, this.ball.z * 0.6));
-          if (Math.abs(this.ball.x - ownGoalX) < 11) {
+          const ballMovingToGoal = (p.team === 1) ? (this.ball.vx < -4) : (this.ball.vx > 4);
+          const idealX = ownGoalX + (p.team === 1 ? 5.2 : -5.2);
+
+          if (ballMovingToGoal) {
+            // Anticipa la traiettoria del tiro verso la linea di porta
+            const timeToGoal = Math.abs(ownGoalX - this.ball.x) / Math.max(1, Math.abs(this.ball.vx));
+            const predictedZ = this.ball.z + this.ball.vz * timeToGoal;
+            const clampedZ = Math.max(-this.GOAL_W / 2 + 0.8, Math.min(this.GOAL_W / 2 - 0.8, predictedZ));
+
+            const dx = idealX - p.x;
+            const dz = clampedZ - p.z;
+            const len = Math.hypot(dx, dz);
+            if (len > 0.25) {
+              aiInput.moveX = dx / len;
+              aiInput.moveZ = dz / len;
+              aiInput.sprint = true;
+            }
+
+            // Parata o tuffo acrobatico se il tiro è a portata (< 3.2m)
+            const distBall = Math.hypot(this.ball.x - p.x, this.ball.z - p.z);
+            if (distBall < 3.2 && (!p.cannotPickupTimer || p.cannotPickupTimer <= 0)) {
+              const shotSpeed = Math.hypot(this.ball.vx, this.ball.vz);
+              if (this.ball.isSpecialShot) {
+                // Impatto tremendo della Super: il portiere viene sbalzato all'indietro
+                sounds.playGloveSave();
+                this.addCameraShake(0.85);
+                p.mesh.rotation.z = Math.sign(this.ball.vz || 1) * 0.8;
+                p.vx = Math.sign(ownGoalX) * 9;
+                p.isSliding = true;
+                p.slideTimer = 0.5;
+              } else if (shotSpeed < 20 && Math.random() < 0.52) {
+                // Presa sicura a due mani
+                this.ball.holder = p;
+                p.possessionTime = 0;
+                p.protectionTimer = 0.8;
+                sounds.playKick(0.5);
+              } else {
+                // Deviazione spettacolare in tuffo a guanto aperto!
+                sounds.playGloveSave();
+                this.addCameraShake(0.65);
+                p.mesh.rotation.z = Math.sign(this.ball.vz || 1) * 0.85;
+                p.cannotPickupTimer = 0.45;
+
+                this.ball.vx = -this.ball.vx * 0.55;
+                this.ball.vz = Math.sign(this.ball.z || 1) * 11 + (Math.random() - 0.5) * 6;
+                this.ball.vy = 2.8;
+                this.ball.spinZ = 0;
+              }
+            }
+          } else if (Math.abs(this.ball.x - ownGoalX) < 11) {
             const dx = this.ball.x - p.x;
             const dz = this.ball.z - p.z;
             const len = Math.hypot(dx, dz);
@@ -1314,6 +1464,7 @@ export class FootballGame {
               aiInput.moveZ = dz / len;
             }
           } else {
+            const idealZ = Math.max(-this.GOAL_W / 2 + 1, Math.min(this.GOAL_W / 2 - 1, this.ball.z * 0.6));
             const dx = idealX - p.x;
             const dz = idealZ - p.z;
             const len = Math.hypot(dx, dz);
@@ -1666,6 +1817,12 @@ export class FootballGame {
     this.ball.y += this.ball.vy * dt;
     this.ball.z += this.ball.vz * dt;
 
+    // Curva aerodinamica a rientrare (Tiro a Giro / Banana shot)
+    if (Math.abs(this.ball.spinZ) > 0.05) {
+      this.ball.vz += this.ball.spinZ * dt;
+      this.ball.spinZ *= Math.pow(0.35, dt);
+    }
+
     // Attrito dell'erba e resistenza per rotolamento realistico e controllabile
     this.ball.vx *= (1 - 0.75 * dt);
     this.ball.vz *= (1 - 0.75 * dt);
@@ -1700,6 +1857,7 @@ export class FootballGame {
         this.ball.x = -halfW;
         this.ball.vx = -this.ball.vx * 0.7;
         sounds.playPost();
+        this.addCameraShake(0.7);
       }
     }
 
@@ -1718,14 +1876,20 @@ export class FootballGame {
         this.ball.x = halfW;
         this.ball.vx = -this.ball.vx * 0.7;
         sounds.playPost();
+        this.addCameraShake(0.7);
       }
     }
 
-    // Bordi laterali (Fallo laterale / rimbalzo su cartelloni)
+    // Bordi laterali (Sponde elastiche rimbalzanti stile Mario Strikers / calcetto indoor)
     const halfH = this.FIELD_H / 2;
     if (Math.abs(this.ball.z) > halfH) {
       this.ball.z = Math.sign(this.ball.z) * halfH;
-      this.ball.vz = -this.ball.vz * 0.65;
+      this.ball.vz = -this.ball.vz * 0.82;
+      if (Math.abs(this.ball.vx) > 2) {
+        this.ball.vx *= 0.96;
+      }
+      sounds.playPost();
+      this.addCameraShake(0.25);
     }
 
     // Rotazione visiva palla
@@ -1733,6 +1897,34 @@ export class FootballGame {
     this.ball.rotX += speed * dt * 2;
     this.ballMesh.rotation.x = this.ball.rotX;
     this.ballMesh.rotation.z += this.ball.vx * dt * 2;
+
+    // Aggiorna scia luminosa ad alta velocità / super tiro
+    if (this.ballTrail && this.ballTrail.length > 0) {
+      const showTrail = (speed > 18 || this.ball.isSpecialShot);
+      if (showTrail) {
+        for (let i = this.ballTrail.length - 1; i > 0; i--) {
+          this.ballTrail[i].mesh.position.copy(this.ballTrail[i - 1].mesh.position);
+          this.ballTrail[i].mesh.visible = true;
+          this.ballTrail[i].mat.opacity = (1 - (i / this.ballTrail.length)) * 0.65;
+          if (this.ball.isSpecialShot) {
+            this.ballTrail[i].mat.color.setHex(0xffaa00);
+          } else {
+            this.ballTrail[i].mat.color.setHex(0x00f0ff);
+          }
+        }
+        this.ballTrail[0].mesh.position.set(this.ball.x, this.ball.y, this.ball.z);
+        this.ballTrail[0].mesh.visible = true;
+        this.ballTrail[0].mat.opacity = 0.75;
+        this.ballTrail[0].mat.color.setHex(this.ball.isSpecialShot ? 0xffdd00 : 0x00ffff);
+      } else {
+        for (let i = 0; i < this.ballTrail.length; i++) {
+          this.ballTrail[i].mat.opacity *= 0.82;
+          if (this.ballTrail[i].mat.opacity < 0.05) {
+            this.ballTrail[i].mesh.visible = false;
+          }
+        }
+      }
+    }
 
     // Aggiorna mesh
     this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
@@ -1749,6 +1941,7 @@ export class FootballGame {
     this.goalCelebrationTimer = 3.5; // 3.5 secondi di celebrazione
 
     sounds.playGoalCheer();
+    this.addCameraShake(1.3);
 
     // Identifica con precisione il marcatore del gol
     const attackingPlayers = (scoringTeam === 1) ? this.playersTeam1 : this.playersTeam2;
@@ -1888,6 +2081,17 @@ export class FootballGame {
     this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.0 * dt;
     this.camera.lookAt(this.ball.x * 0.35, 0, this.ball.z * 0.28);
 
+    // Applicazione Camera Shake per impatto arcade
+    if (this.cameraShake > 0.01) {
+      const shakeX = (Math.random() - 0.5) * this.cameraShake * 1.8;
+      const shakeY = (Math.random() - 0.5) * this.cameraShake * 1.2;
+      this.camera.position.x += shakeX;
+      this.camera.position.y += shakeY;
+      this.cameraShake *= Math.pow(0.04, dt);
+    } else {
+      this.cameraShake = 0;
+    }
+
     // 5. Render scena
     this.renderer.render(this.scene, this.camera);
 
@@ -1897,6 +2101,7 @@ export class FootballGame {
         score: this.score,
         matchTime: Math.ceil(this.matchTime),
         ball: { x: this.ball.x, z: this.ball.z },
+        hasBall: this.userTeamHasBall(),
         p1: this.playersTeam1.map(p => ({ x: p.x, z: p.z, id: p.id, name: p.name })),
         p2: this.playersTeam2.map(p => ({ x: p.x, z: p.z, id: p.id, name: p.name })),
         shotPower: this.input.shotPower,
