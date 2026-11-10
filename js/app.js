@@ -285,6 +285,22 @@ class App {
       btnSwitch.addEventListener('touchend', () => btnSwitch.classList.remove('active'));
       btnSwitch.addEventListener('touchcancel', () => btnSwitch.classList.remove('active'));
     }
+
+    // Pulsante Touch Super Special Mario Strikers
+    const btnSpecial = document.getElementById('touch-special');
+    if (btnSpecial) {
+      btnSpecial.addEventListener('touchstart', (e) => {
+        btnSpecial.classList.add('active');
+        if (this.game) {
+          const myTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
+          this.game.triggerSpecial(myTeam);
+        }
+        sounds.playBeep(880, 0.05);
+        e.preventDefault();
+      }, { passive: false });
+      btnSpecial.addEventListener('touchend', () => btnSpecial.classList.remove('active'));
+      btnSpecial.addEventListener('touchcancel', () => btnSpecial.classList.remove('active'));
+    }
   }
 
   checkUrlParams() {
@@ -390,12 +406,24 @@ class App {
     CHARACTERS.forEach(char => {
       const card = document.createElement('div');
       card.className = 'char-card';
+      if (char.id === 'ara') {
+        card.classList.add('char-card-ara');
+      }
       card.id = `char-card-${char.id}`;
 
       card.innerHTML = `
-        <div class="char-card-header">
-          <span class="char-name">${char.name}</span>
-          <span class="char-nick">${char.nickname}</span>
+        <div class="char-top-row">
+          ${char.avatar ? `<img src="${char.avatar}" class="char-card-avatar" alt="${char.name}">` : ''}
+          <div style="flex: 1; min-width: 0;">
+            <div class="char-card-header">
+              <span class="char-name">${char.name}</span>
+              <span class="char-nick">${char.nickname}</span>
+            </div>
+            <div class="char-special-badge" style="color: ${char.specialColor || '#ffd700'}; border-color: ${char.specialColor || '#ffd700'};">
+              <span>${char.specialIcon || '⚡'}</span>
+              <span>${char.special}</span>
+            </div>
+          </div>
         </div>
         <div class="char-desc">${char.desc}</div>
         <div class="stat-bars">
@@ -553,7 +581,8 @@ class App {
       isClient: (this.gameMode === 'online' && !this.isHost),
       networkManager: this.net,
       onTogglePause: () => this.togglePause(),
-      onGoal: (team, score) => this.handleGoal(team, score),
+      onSpecialTrigger: (data) => this.showSpecialCutin(data.charData),
+      onGoal: (team, score, scorer, isSpecial) => this.handleGoal(team, score, scorer, isSpecial),
       onMatchEnd: (score) => this.handleMatchEnd(score),
       onUpdateHUD: (hudData) => this.updateHUD(hudData)
     });
@@ -573,13 +602,70 @@ class App {
     }
   }
 
-  handleGoal(team, score) {
-    const teamName = (team === 1) ? "SQUADRA ROSSA" : "SQUADRA BLU";
-    this.goalBanner.innerText = `GOOOOL!\n${teamName}`;
+  // Mostra il Cinematic Cut-in Mario Strikers per la Super Abilità
+  showSpecialCutin(charData) {
+    const cutinEl = document.getElementById('special-cutin');
+    if (!cutinEl || !charData) return;
+
+    const avatarEl = document.getElementById('cutin-avatar');
+    const nameEl = document.getElementById('cutin-char-name');
+    const specialEl = document.getElementById('cutin-special-name');
+
+    if (avatarEl) {
+      avatarEl.src = charData.avatar || 'assets/ara_avatar.png';
+    }
+    if (nameEl) {
+      nameEl.innerText = charData.name.toUpperCase();
+    }
+    if (specialEl) {
+      const icon = charData.specialIcon || '⚡';
+      specialEl.innerText = `${icon} ${charData.special.toUpperCase()}! ${icon}`;
+      if (charData.specialColor) {
+        specialEl.style.color = charData.specialColor;
+      }
+    }
+
+    cutinEl.classList.add('active');
+    setTimeout(() => {
+      cutinEl.classList.remove('active');
+    }, 1300);
+  }
+
+  handleGoal(team, score, scorer, isSpecial) {
+    const scorerName = scorer ? scorer.name.toUpperCase() : (team === 1 ? 'ROSSI' : 'BLU');
+    const teamLabel = (team === 1) ? 'SQUADRA 1 (ROSSI)' : 'SQUADRA 2 (BLU)';
+
+    const scorerNameEl = document.getElementById('goal-scorer-name');
+    const scorerTeamEl = document.getElementById('goal-scorer-team');
+    const scorerImgEl = document.getElementById('goal-scorer-img');
+    const specialTagEl = document.getElementById('goal-special-tag');
+
+    if (scorerNameEl) scorerNameEl.innerText = `${scorerName}!`;
+    if (scorerTeamEl) scorerTeamEl.innerText = teamLabel;
+
+    if (scorerImgEl) {
+      const avatarUrl = (scorer && scorer.charData && scorer.charData.avatar) ? scorer.charData.avatar : (scorer && scorer.id === 'ara' ? 'assets/ara_avatar.png' : null);
+      if (avatarUrl) {
+        scorerImgEl.src = avatarUrl;
+        scorerImgEl.style.display = 'block';
+      } else {
+        scorerImgEl.style.display = 'none';
+      }
+    }
+
+    if (specialTagEl) {
+      if (isSpecial && scorer && scorer.charData && scorer.charData.special) {
+        specialTagEl.innerText = `⚡ SPECIAL: ${scorer.charData.special.toUpperCase()} ⚡`;
+        specialTagEl.style.display = 'inline-block';
+      } else {
+        specialTagEl.style.display = 'none';
+      }
+    }
+
     this.goalBanner.classList.add('show');
     setTimeout(() => {
       this.goalBanner.classList.remove('show');
-    }, 3000);
+    }, 3200);
   }
 
   handleMatchEnd(score) {
@@ -624,6 +710,26 @@ class App {
     const mins = Math.floor(hudData.matchTime / 60);
     const secs = (hudData.matchTime % 60).toString().padStart(2, '0');
     this.matchClockEl.innerText = `${mins}:${secs}`;
+
+    // Super Gauge HUD
+    const myTeamMeter = (this.gameMode === 'online' && !this.isHost) ? hudData.specialMeter2 : hudData.specialMeter1;
+    const specialFill = document.getElementById('special-fill');
+    const specialVal = document.getElementById('special-val');
+    const specialContainer = document.getElementById('special-meter-container');
+    const touchSpecialBtn = document.getElementById('touch-special');
+
+    if (specialFill && myTeamMeter !== undefined) {
+      specialFill.style.width = `${myTeamMeter}%`;
+    }
+    if (specialVal && myTeamMeter !== undefined) {
+      specialVal.innerText = `${myTeamMeter}%`;
+    }
+    if (specialContainer) {
+      specialContainer.classList.toggle('ready', myTeamMeter >= 100);
+    }
+    if (touchSpecialBtn) {
+      touchSpecialBtn.classList.toggle('ready', myTeamMeter >= 100);
+    }
 
     // Barra di caricamento tiro
     if (hudData.shotPower > 0.05) {

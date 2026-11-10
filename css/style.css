@@ -295,6 +295,46 @@ h1, h2, h3 {
   overflow: hidden;
 }
 
+.char-card.char-card-ara {
+  border-color: #ffd700;
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.35);
+}
+
+.char-top-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.char-card-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 2px solid #ffd700;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  background: #0b141f;
+  flex-shrink: 0;
+}
+
+.char-special-badge {
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  color: #ffd700;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .char-card:hover {
   transform: translateY(-3px);
   border-color: var(--primary);
@@ -512,26 +552,282 @@ h1, h2, h3 {
   height: 100%;
 }
 
-/* Goal Banner Animato */
+/* Special Meter HUD */
+.special-meter-container {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 18, 28, 0.9);
+  border: 1.5px solid rgba(255, 215, 0, 0.5);
+  border-radius: 20px;
+  padding: 5px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 50;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 15px rgba(255, 215, 0, 0.2);
+  pointer-events: none;
+  min-width: 260px;
+  backdrop-filter: blur(8px);
+  transition: all 0.25s ease;
+}
+
+.special-meter-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.15rem;
+  color: #ffd700;
+  letter-spacing: 1.5px;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+
+.special-track {
+  width: 100%;
+  height: 9px;
+  background: #0d1520;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid #2a3a4c;
+  position: relative;
+}
+
+.special-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #ffd700, #fff275);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.7);
+  border-radius: 4px;
+  transition: width 0.15s ease-out;
+}
+
+.special-meter-container.ready {
+  border-color: #ffd700;
+  box-shadow: 0 0 25px rgba(255, 215, 0, 0.75);
+}
+
+.special-meter-container.ready .special-fill {
+  background: linear-gradient(90deg, #ff0055, #ffd700, #00f0ff);
+  animation: specialPulse 0.5s infinite alternate;
+}
+
+.special-ready-label {
+  display: none;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.15rem;
+  color: #fff;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 10px #ffd700;
+  margin-top: 2px;
+  animation: flashReady 0.5s infinite alternate;
+}
+
+.special-meter-container.ready .special-ready-label {
+  display: block;
+}
+
+@keyframes specialPulse {
+  from { box-shadow: 0 0 8px #ffd700; }
+  to { box-shadow: 0 0 25px #00f0ff, 0 0 18px #ffd700; }
+}
+
+@keyframes flashReady {
+  from { opacity: 0.75; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1.03); color: #ffd700; }
+}
+
+/* Mario Strikers Special Cinematic Cut-in */
+.special-cutin {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 150;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease;
+  overflow: hidden;
+}
+
+.special-cutin.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.cutin-bg-lines {
+  position: absolute;
+  inset: -60%;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 215, 0, 0.22),
+    rgba(255, 215, 0, 0.22) 20px,
+    rgba(0, 0, 0, 0.8) 20px,
+    rgba(0, 0, 0, 0.8) 40px
+  );
+  animation: speedlines 0.35s linear infinite;
+}
+
+@keyframes speedlines {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(40px); }
+}
+
+.cutin-content {
+  position: relative;
+  width: 100%;
+  max-width: 920px;
+  background: linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(12, 18, 28, 0.96) 12%, rgba(12, 18, 28, 0.96) 88%, rgba(0,0,0,0) 100%);
+  border-top: 4px solid #ffd700;
+  border-bottom: 4px solid #ffd700;
+  padding: 24px 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  box-shadow: 0 0 60px rgba(255, 215, 0, 0.6);
+  transform: skewX(-8deg) scaleX(0.7);
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.special-cutin.active .cutin-content {
+  transform: skewX(-8deg) scaleX(1);
+}
+
+.cutin-avatar-wrap {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  border: 4px solid #ffd700;
+  overflow: hidden;
+  box-shadow: 0 0 35px rgba(255, 215, 0, 0.85);
+  flex-shrink: 0;
+  background: #0f1722;
+  transform: skewX(8deg);
+}
+
+.cutin-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cutin-text {
+  transform: skewX(8deg);
+  display: flex;
+  flex-direction: column;
+}
+
+.cutin-char-name {
+  font-family: 'Teko', sans-serif;
+  font-size: 3.6rem;
+  line-height: 0.85;
+  color: #ffd700;
+  letter-spacing: 4px;
+  text-shadow: 0 0 25px rgba(255, 215, 0, 0.8), 2px 2px 0 #000;
+}
+
+.cutin-special-name {
+  font-family: 'Teko', sans-serif;
+  font-size: 2.3rem;
+  line-height: 1.1;
+  color: #ffffff;
+  letter-spacing: 2px;
+  text-shadow: 0 0 20px #00f0ff, 2px 2px 0 #000;
+}
+
+/* Upgraded Goal Banner con Nome Marcatore e Foto */
 #goal-banner {
   position: absolute;
-  top: 30%;
+  top: 32%;
   left: 50%;
-  transform: translate(-50%, -50%) scale(0.5);
-  font-family: 'Teko', sans-serif;
-  font-size: 7rem;
-  color: #ffd700;
-  text-shadow: 0 0 40px #ffaa00, 0 0 80px #ff0055, 0 4px 10px #000;
+  transform: translate(-50%, -50%) scale(0.6);
   opacity: 0;
   pointer-events: none;
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  z-index: 100;
-  letter-spacing: 5px;
+  transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 120;
 }
 
 #goal-banner.show {
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1.15);
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.goal-banner-card {
+  background: linear-gradient(135deg, rgba(16, 24, 38, 0.96) 0%, rgba(28, 14, 20, 0.96) 100%);
+  border: 3px solid #ffd700;
+  border-radius: 20px;
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  box-shadow: 0 0 60px rgba(255, 215, 0, 0.6), 0 20px 40px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(12px);
+}
+
+.goal-scorer-img {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  border: 4px solid #ffd700;
+  object-fit: cover;
+  box-shadow: 0 0 25px rgba(255, 215, 0, 0.7);
+  background: #111a24;
+  flex-shrink: 0;
+}
+
+.goal-banner-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.goal-title-flash {
+  font-family: 'Teko', sans-serif;
+  font-size: 3.8rem;
+  line-height: 0.85;
+  color: #ffd700;
+  letter-spacing: 4px;
+  text-shadow: 0 0 30px #ff9900, 0 0 60px #ff0055;
+  animation: goalTitlePulse 0.4s infinite alternate;
+}
+
+@keyframes goalTitlePulse {
+  from { transform: scale(0.98); }
+  to { transform: scale(1.04); }
+}
+
+.goal-scorer-name {
+  font-family: 'Teko', sans-serif;
+  font-size: 3.2rem;
+  line-height: 0.95;
+  color: #ffffff;
+  letter-spacing: 3px;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+}
+
+.goal-scorer-team {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.goal-special-tag {
+  display: inline-block;
+  margin-top: 6px;
+  background: rgba(255, 215, 0, 0.2);
+  border: 1px solid #ffd700;
+  color: #ffd700;
+  font-family: 'Teko', sans-serif;
+  font-size: 1.3rem;
+  padding: 2px 10px;
+  border-radius: 6px;
+  letter-spacing: 1px;
 }
 
 /* Quick Emote Bar */
@@ -688,6 +984,22 @@ body.touch-device .touch-controls {
   box-shadow: 0 0 16px rgba(255, 215, 0, 0.4);
 }
 
+.touch-btn-special {
+  width: 66px;
+  height: 66px;
+  background: radial-gradient(circle, rgba(255, 215, 0, 0.45) 0%, rgba(40, 30, 8, 0.95) 100%);
+  border: 2.5px solid #ffd700;
+  color: #ffd700;
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.45);
+}
+
+.touch-btn-special.ready {
+  background: radial-gradient(circle, rgba(255, 215, 0, 0.8) 0%, rgba(255, 0, 85, 0.85) 100%);
+  border-color: #ffffff;
+  color: #ffffff;
+  animation: specialPulse 0.5s infinite alternate;
+}
+
 .touch-btn-switch {
   width: 62px;
   height: 62px;
@@ -836,16 +1148,20 @@ body.touch-device .touch-controls {
     gap: 10px;
   }
   .touch-btn-shoot {
-    width: 72px;
-    height: 72px;
+    width: 68px;
+    height: 68px;
   }
   .touch-btn-pass {
-    width: 62px;
-    height: 62px;
+    width: 58px;
+    height: 58px;
+  }
+  .touch-btn-special {
+    width: 58px;
+    height: 58px;
   }
   .touch-btn-switch {
-    width: 56px;
-    height: 56px;
+    width: 52px;
+    height: 52px;
   }
 
   .title-glow {

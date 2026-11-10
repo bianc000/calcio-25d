@@ -177,6 +177,19 @@
       <button id="btn-pause-toggle" class="btn-pause-hud" title="Pausa (ESC)">⏸️ PAUSA</button>
     </div>
 
+    <!-- Mario Strikers Special Gauge -->
+    <div id="special-meter-container" class="special-meter-container">
+      <div class="special-meter-header">
+        <span class="special-icon">⭐</span>
+        <span class="special-title">SUPER GAUGE</span>
+        <span id="special-val" class="special-val">50%</span>
+      </div>
+      <div class="special-track">
+        <div id="special-fill" class="special-fill" style="width: 50%;"></div>
+      </div>
+      <div id="special-ready-label" class="special-ready-label">⚡ SPECIAL PRONTA! PREMI [E] / [SUPER] ⚡</div>
+    </div>
+
     <!-- Barra Caricamento Tiro -->
     <div id="shot-power-container" class="shot-power-container">
       <div id="shot-power-bar" class="shot-power-bar"></div>
@@ -210,6 +223,10 @@
           <span class="btn-icon">🔄</span>
           <span class="btn-label">CAMBIA</span>
         </div>
+        <div id="touch-special" class="touch-btn touch-btn-special">
+          <span class="btn-icon">⭐</span>
+          <span class="btn-label">SUPER</span>
+        </div>
         <div id="touch-pass" class="touch-btn touch-btn-pass">
           <span class="btn-icon">👟</span>
           <span class="btn-label">PASS</span>
@@ -222,8 +239,32 @@
     </div>
   </div>
 
-  <!-- Banner Animato GOOOOL! -->
-  <div id="goal-banner">GOOOOL!</div>
+  <!-- Mario Strikers Special Cinematic Cut-in -->
+  <div id="special-cutin" class="special-cutin">
+    <div class="cutin-bg-lines"></div>
+    <div class="cutin-content">
+      <div class="cutin-avatar-wrap">
+        <img id="cutin-avatar" class="cutin-avatar" src="assets/ara_avatar.png" alt="Avatar">
+      </div>
+      <div class="cutin-text">
+        <div id="cutin-char-name" class="cutin-char-name">ARA</div>
+        <div id="cutin-special-name" class="cutin-special-name">🦅 TIRO DELL'OCCHIO DI FALCO! 🦅</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Banner Animato GOL con Nome Marcatore e Foto -->
+  <div id="goal-banner" class="goal-banner">
+    <div class="goal-banner-card">
+      <img id="goal-scorer-img" class="goal-scorer-img" src="assets/ara_avatar.png" alt="Marcatore">
+      <div class="goal-banner-details">
+        <div class="goal-title-flash">GOL!</div>
+        <div id="goal-scorer-name" class="goal-scorer-name">ARA!</div>
+        <div id="goal-scorer-team" class="goal-scorer-team">SQUADRA 1 (ROSSI)</div>
+        <div id="goal-special-tag" class="goal-special-tag">⚡ SPECIAL: TIRO DELL'OCCHIO DI FALCO ⚡</div>
+      </div>
+    </div>
+  </div>
 
   <!-- MODALE PAUSA -->
   <div id="pause-modal" class="modal-screen hidden interactive">

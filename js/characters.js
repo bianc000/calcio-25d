@@ -1,4 +1,4 @@
-// Definizione dei 12 Personaggi Giocabili
+// Definizione dei 12 Personaggi Giocabili - Stile Mario Strikers
 export const CHARACTERS = [
   {
     id: 'ento',
@@ -13,7 +13,11 @@ export const CHARACTERS = [
     shot: 96,
     tackle: 76,
     pass: 78,
-    special: 'Cannone Infuocato'
+    special: 'Cannone Infuocato',
+    specialDesc: 'Bordata fiammeggiante a velocità supersonica che travolge i difensori e sfonda la rete!',
+    specialColor: '#ff3838',
+    specialIcon: '🔥',
+    specialType: 'shot'
   },
   {
     id: 'lindi',
@@ -28,7 +32,11 @@ export const CHARACTERS = [
     shot: 79,
     tackle: 82,
     pass: 98,
-    special: 'Lancio Laser'
+    special: 'Lancio Laser',
+    specialDesc: 'Traiettoria laser a zig-zag ipnotica e imprevedibile che beffa la difesa!',
+    specialColor: '#00f0ff',
+    specialIcon: '⚡',
+    specialType: 'shot'
   },
   {
     id: 'matti',
@@ -43,7 +51,11 @@ export const CHARACTERS = [
     shot: 82,
     tackle: 73,
     pass: 83,
-    special: 'Scatto Fulmineo'
+    special: 'Scatto Fulmineo',
+    specialDesc: 'Super sprint con scia elettrica che brucia il campo e dribbla chiunque!',
+    specialColor: '#ffe600',
+    specialIcon: '⚡',
+    specialType: 'boost'
   },
   {
     id: 'bubi',
@@ -58,7 +70,11 @@ export const CHARACTERS = [
     shot: 75,
     tackle: 98,
     pass: 77,
-    special: 'Tackle Roccia'
+    special: 'Tackle Terremoto',
+    specialDesc: 'Onda sismica radiale che atterra gli avversari e spazza via il pallone!',
+    specialColor: '#e67e22',
+    specialIcon: '🪨',
+    specialType: 'tackle'
   },
   {
     id: 'lollo',
@@ -73,22 +89,32 @@ export const CHARACTERS = [
     shot: 91,
     tackle: 74,
     pass: 90,
-    special: 'Tiro a Giro'
+    special: 'Tiro a Giro Tornado',
+    specialDesc: 'Vortice parabolico a rientrare con curva estrema che si infila all’incrocio!',
+    specialColor: '#a855f7',
+    specialIcon: '🌪️',
+    specialType: 'shot'
   },
   {
     id: 'ara',
     name: 'Ara',
-    nickname: 'Il Metronomo',
-    desc: 'Equilibrio totale: ruba palloni a centrocampo e imposta il contropiede.',
+    nickname: 'Occhio di Falco',
+    desc: 'Visione di gioco celestiale e precisione chirurgica: il suo Tiro dell’Occhio di Falco non sbaglia mai.',
+    avatar: 'assets/ara_avatar.png',
+    spriteUrl: 'assets/ara_avatar.png',
     hairColor: '#241b18',
     hairStyle: 'short',
-    skinColor: '#c68642',
+    skinColor: '#f1caa0',
     height: 1.05,
-    speed: 86,
-    shot: 83,
-    tackle: 89,
-    pass: 88,
-    special: 'Intercetto Flash'
+    speed: 88,
+    shot: 95,
+    tackle: 88,
+    pass: 92,
+    special: "Tiro dell'occhio di Falco",
+    specialDesc: 'Tiro teleguidato con scia d’oro puro che si insacca infallibile all’incrocio dei pali!',
+    specialColor: '#ffd700',
+    specialIcon: '🦅',
+    specialType: 'shot'
   },
   {
     id: 'roby',
@@ -103,7 +129,11 @@ export const CHARACTERS = [
     shot: 95,
     tackle: 75,
     pass: 84,
-    special: 'Mirino Infallibile'
+    special: 'Mirino Infallibile',
+    specialDesc: 'Conclusione laser a fil di palo con traiettoria tesa come una corda di violino!',
+    specialColor: '#38bdf8',
+    specialIcon: '🎯',
+    specialType: 'shot'
   },
   {
     id: 'pibe',
@@ -118,7 +148,11 @@ export const CHARACTERS = [
     shot: 93,
     tackle: 77,
     pass: 93,
-    special: 'Rabona Magica'
+    special: 'Rabona Magica',
+    specialDesc: 'Tocco liftato a sorpresa ad effetto arcobaleno che pietrifica il portiere!',
+    specialColor: '#ec4899',
+    specialIcon: '🪄',
+    specialType: 'shot'
   },
   {
     id: 'jelmo',
@@ -133,7 +167,11 @@ export const CHARACTERS = [
     shot: 72,
     tackle: 96,
     pass: 82,
-    special: 'Paratona Felina'
+    special: 'Muro Invalicabile',
+    specialDesc: 'Barriera energetica che respinge automaticamente qualsiasi conclusione avversaria!',
+    specialColor: '#10b981',
+    specialIcon: '🧤',
+    specialType: 'buff'
   },
   {
     id: 'jona',
@@ -148,7 +186,11 @@ export const CHARACTERS = [
     shot: 83,
     tackle: 94,
     pass: 81,
-    special: 'Pressing Furioso'
+    special: 'Carica del Gladiatore',
+    specialDesc: 'Scivolata corazzata con raggio maggiorato che vince qualsiasi contrasto!',
+    specialColor: '#f97316',
+    specialIcon: '🛡️',
+    specialType: 'tackle'
   },
   {
     id: 'kri',
@@ -163,7 +205,11 @@ export const CHARACTERS = [
     shot: 92,
     tackle: 76,
     pass: 84,
-    special: 'Tiro Velenoso'
+    special: 'Tiro del Cobra',
+    specialDesc: 'Tiro velenoso a picchiata improvvisa che cambia direzione all’ultimo momento!',
+    specialColor: '#14b8a6',
+    specialIcon: '🐍',
+    specialType: 'shot'
   },
   {
     id: 'leon',
@@ -178,7 +224,11 @@ export const CHARACTERS = [
     shot: 90,
     tackle: 88,
     pass: 89,
-    special: 'Spirito da Leader'
+    special: 'Ruggito del Leone',
+    specialDesc: 'Bordata regale con onda d’urto dorata che potenzia la velocità di tutta la squadra!',
+    specialColor: '#f59e0b',
+    specialIcon: '🦁',
+    specialType: 'shot'
   }
 ];
 

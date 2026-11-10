@@ -241,6 +241,62 @@ class SoundManager {
     osc.start(now);
     osc.stop(now + dur);
   }
+
+  // Notifica Special Ready (Arpeggio celestiale)
+  playSpecialReady() {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    const freqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+    freqs.forEach((freq, idx) => {
+      setTimeout(() => this.playBeep(freq, 0.12), idx * 70);
+    });
+  }
+
+  // Mario Strikers Super Strike / Special Unleash
+  playSpecialStrike(type = 'shot') {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    const now = this.ctx.currentTime;
+
+    // 1. Synth bass sweep
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(65, now + 0.4);
+
+    gain.gain.setValueAtTime(0.7, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.45);
+
+    // 2. Whoosh / Laser blast
+    this.playPowerShot();
+  }
+
+  // Verso del Falco per l'abilità di Ara
+  playEagleCry() {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1800, now);
+    osc.frequency.linearRampToValueAtTime(2600, now + 0.12);
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.45);
+
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.45);
+  }
 }
 
 export const sounds = new SoundManager();

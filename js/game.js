@@ -26,6 +26,14 @@ export class FootballGame {
     this.team1Ids = options.team1 || ['ento', 'lindi', 'bubi'];
     this.team2Ids = options.team2 || ['pibe', 'matti', 'jelmo'];
 
+    // Mario Strikers Super Gauge
+    this.specialMeter1 = 50;
+    this.specialMeter2 = 50;
+    this.specialAudioPlayed1 = false;
+    this.specialAudioPlayed2 = false;
+    this.goalShieldTimer = 0;
+    this.goalShieldTeam = 0;
+
     // Input locale
     this.input = {
       moveX: 0,
@@ -316,11 +324,17 @@ export class FootballGame {
       radius: ballRadius,
       rotX: 0,
       rotZ: 0,
-      holder: null // player in possesso
+      holder: null, // player in possesso
+      lastPossessor: null,
+      lastKicker: null,
+      lastShooter: null,
+      isSpecialShot: false,
+      specialType: null,
+      specialShooter: null
     };
   }
 
-  createNameTag(name, teamColor) {
+  createNameTag(name, teamColor, isAra = false) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 64;
@@ -342,24 +356,43 @@ export class FootballGame {
     ctx.fillStyle = 'rgba(8, 16, 28, 0.88)';
     ctx.fill();
 
-    // Bordo identificativo con colore della squadra
     const isTeam1 = (teamColor === 0xe74c3c);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = isTeam1 ? '#ff3838' : '#00f0ff';
-    ctx.stroke();
 
-    // Pallino squadra a sinistra
-    ctx.beginPath();
-    ctx.arc(38, 32, 8, 0, Math.PI * 2);
-    ctx.fillStyle = isTeam1 ? '#ff3838' : '#00f0ff';
-    ctx.fill();
+    if (isAra) {
+      // Badge Oro speciale per Ara
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#ffd700';
+      ctx.stroke();
 
-    // Nome del giocatore in grassetto ad alta visibilità
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 30px "Rajdhani", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(name.toUpperCase(), 142, 33);
+      ctx.beginPath();
+      ctx.arc(38, 32, 9, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd700';
+      ctx.fill();
+
+      ctx.fillStyle = '#ffd700';
+      ctx.font = 'bold 28px "Rajdhani", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🦅 ARA 🦅', 142, 33);
+    } else {
+      // Bordo identificativo con colore della squadra
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = isTeam1 ? '#ff3838' : '#00f0ff';
+      ctx.stroke();
+
+      // Pallino squadra a sinistra
+      ctx.beginPath();
+      ctx.arc(38, 32, 8, 0, Math.PI * 2);
+      ctx.fillStyle = isTeam1 ? '#ff3838' : '#00f0ff';
+      ctx.fill();
+
+      // Nome del giocatore in grassetto ad alta visibilità
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 30px "Rajdhani", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(name.toUpperCase(), 142, 33);
+    }
 
     const texture = new window.THREE.CanvasTexture(canvas);
     texture.minFilter = window.THREE.LinearFilter;
@@ -404,6 +437,21 @@ export class FootballGame {
     head.position.y = 1.95 * scale;
     head.castShadow = true;
     root.add(head);
+
+    // 2b. Sprite Volto Foto Personalizzato (per Ara e avatar speciali)
+    if (charData.id === 'ara' || charData.avatar) {
+      const loader = new window.THREE.TextureLoader();
+      const faceTex = loader.load(charData.avatar || 'assets/ara_avatar.png');
+      const faceMat = new window.THREE.SpriteMaterial({
+        map: faceTex,
+        transparent: true,
+        depthTest: true
+      });
+      const faceSprite = new window.THREE.Sprite(faceMat);
+      faceSprite.position.set(0, 2.05 * scale, 0);
+      faceSprite.scale.set(1.45 * scale, 1.45 * scale, 1);
+      root.add(faceSprite);
+    }
 
     // 3. Capelli personalizzati
     const hairHex = parseInt(charData.hairColor.replace('#', '0x')) || 0x222222;
@@ -476,7 +524,7 @@ export class FootballGame {
     root.add(arrow);
 
     // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa
-    const nameTag = this.createNameTag(charData.name, teamColor);
+    const nameTag = this.createNameTag(charData.name, teamColor, charData.id === 'ara');
     nameTag.position.set(0, 3.1 * scale, 0);
     nameTag.scale.set(3.4, 0.85, 1);
     root.add(nameTag);
@@ -605,6 +653,13 @@ export class FootballGame {
         }
       }
 
+      // Mario Strikers Super Move (E, F, R)
+      if (e.code === 'KeyE' || e.code === 'KeyF' || e.code === 'KeyR') {
+        const myTeam = this.options.isClient ? 2 : 1;
+        this.triggerSpecial(myTeam);
+        e.preventDefault();
+      }
+
       // Tasti di Tiro: X, K, C, V, Invio
       const isShootKey = (e.code === 'KeyX' || e.code === 'KeyK' || e.code === 'KeyC' || e.code === 'KeyV' || e.code === 'Enter');
 
@@ -697,6 +752,12 @@ export class FootballGame {
     this.ball.vy = 0;
     this.ball.vz = 0;
     this.ball.holder = null;
+    this.ball.lastPossessor = null;
+    this.ball.lastKicker = null;
+    this.ball.lastShooter = null;
+    this.ball.isSpecialShot = false;
+    this.ball.specialType = null;
+    this.ball.specialShooter = null;
 
     // Rimetti i giocatori nelle rispettive metà campo
     this.playersTeam1.forEach(p => {
@@ -830,6 +891,8 @@ export class FootballGame {
         const holder = this.ball.holder;
         if (!holder || holder.protectionTimer <= 0) {
           this.ball.holder = null;
+          this.ball.lastKicker = p;
+          this.chargeMeter(p.team, 15);
           p.cannotPickupTimer = 0.2;
           const kickDirX = Math.sin(p.rot);
           const kickDirZ = Math.cos(p.rot);
@@ -931,6 +994,8 @@ export class FootballGame {
         } else {
           // Contrasto duro / rimpallo che libera la palla
           this.ball.holder = null;
+          this.ball.lastKicker = p;
+          this.chargeMeter(p.team, 12);
           p.cannotPickupTimer = 0.25;
           carrier.cannotPickupTimer = 0.25;
           carrier.protectionTimer = 0;
@@ -981,6 +1046,9 @@ export class FootballGame {
 
         // 1. Libera immediatamente il possesso e attiva cooldown al tiratore per non farlo riagganciare
         this.ball.holder = null;
+        this.ball.lastShooter = p;
+        this.ball.lastKicker = p;
+        this.chargeMeter(p.team, 12);
         p.cannotPickupTimer = 0.45;
         p.possessionTime = 0;
 
@@ -1037,6 +1105,8 @@ export class FootballGame {
 
         // 1. Libera immediatamente il possesso e attiva cooldown al passatore
         this.ball.holder = null;
+        this.ball.lastKicker = p;
+        this.chargeMeter(p.team, 10);
         p.cannotPickupTimer = 0.5;
         p.possessionTime = 0;
 
@@ -1086,6 +1156,9 @@ export class FootballGame {
         const forwardZ = Math.cos(shootAngle);
 
         p.cannotPickupTimer = 0.45;
+        this.ball.lastShooter = p;
+        this.ball.lastKicker = p;
+        this.chargeMeter(p.team, 12);
 
         this.ball.x += forwardX * 0.8;
         this.ball.z += forwardZ * 0.8;
@@ -1105,6 +1178,8 @@ export class FootballGame {
       const pickupRadius = (isHuman ? 1.6 : 1.25) * p.scale;
       if (distToBall < pickupRadius && this.ball.y < 2.0 && !this.ball.holder && (!p.cannotPickupTimer || p.cannotPickupTimer <= 0)) {
         this.ball.holder = p;
+        this.ball.lastPossessor = p;
+        this.ball.isSpecialShot = false;
         p.possessionTime = 0;
         p.protectionTimer = 0.35; // 0.35s di protezione iniziale
         sounds.playKick(0.4);
@@ -1169,7 +1244,9 @@ export class FootballGame {
         const distToGoal = Math.abs(targetGoalX - p.x);
 
         // Tira SOLO se molto vicina alla porta (< 15 metri) e centrale, dopo aver controllato la palla
-        if (distToGoal < 15 && Math.abs(p.z) < 9 && p.possessionTime > 0.8) {
+        if (this.isSinglePlayer && this.specialMeter2 >= 100 && distToGoal < 28 && p.possessionTime > 0.6 && Math.random() < 0.05) {
+          this.triggerSpecial(2);
+        } else if (distToGoal < 15 && Math.abs(p.z) < 9 && p.possessionTime > 0.8) {
           aiInput.shootTrigger = true;
           aiInput.shotPower = 0.55 + Math.random() * 0.25;
         } else {
@@ -1376,6 +1453,176 @@ export class FootballGame {
     this.updatePlayer(p, aiInput, dt);
   }
 
+  // Ricarica la Super Gauge
+  chargeMeter(teamNum, amount) {
+    if (teamNum === 1) {
+      this.specialMeter1 = Math.min(100, this.specialMeter1 + amount);
+      if (this.specialMeter1 >= 100 && !this.specialAudioPlayed1) {
+        sounds.playSpecialReady();
+        this.specialAudioPlayed1 = true;
+      }
+    } else {
+      this.specialMeter2 = Math.min(100, this.specialMeter2 + amount);
+      if (this.specialMeter2 >= 100 && !this.specialAudioPlayed2) {
+        sounds.playSpecialReady();
+        this.specialAudioPlayed2 = true;
+      }
+    }
+  }
+
+  // Scatena la Super Abilità Mario Strikers
+  triggerSpecial(teamNum) {
+    if (this.state !== 'playing') return false;
+    const meter = (teamNum === 1) ? this.specialMeter1 : this.specialMeter2;
+    if (meter < 100) {
+      sounds.playBeep(260, 0.08);
+      return false;
+    }
+
+    // Consuma Super Gauge
+    if (teamNum === 1) {
+      this.specialMeter1 = 0;
+      this.specialAudioPlayed1 = false;
+    } else {
+      this.specialMeter2 = 0;
+      this.specialAudioPlayed2 = false;
+    }
+
+    const activeIdx = (teamNum === 1) ? this.activePlayerIdx1 : this.activePlayerIdx2;
+    const player = (teamNum === 1) ? this.playersTeam1[activeIdx] : this.playersTeam2[activeIdx];
+    const char = player.charData;
+
+    // Cut-in Cinematic Mario Strikers
+    if (this.options.onSpecialTrigger) {
+      this.options.onSpecialTrigger({ player, charData: char });
+    }
+
+    // Effetti Sonori Dedicati
+    sounds.playSpecialStrike(char.specialType);
+    if (char.id === 'ara') {
+      sounds.playEagleCry();
+    }
+
+    // Libera la palla e prepara la super mossa
+    this.ball.holder = null;
+    player.cannotPickupTimer = 0.7;
+
+    const targetGoalX = (teamNum === 1) ? (this.FIELD_W / 2) : (-this.FIELD_W / 2);
+    const oppTeam = (teamNum === 1) ? this.playersTeam2 : this.playersTeam1;
+
+    // Esegui la super mossa specifica
+    switch (char.id) {
+      case 'ara': { // TIRO DELL'OCCHIO DI FALCO
+        const targetZ = (player.z >= 0) ? (this.GOAL_W / 2 - 1.2) : (-this.GOAL_W / 2 + 1.2);
+        const dx = targetGoalX - player.x;
+        const dz = targetZ - player.z;
+        const dist = Math.hypot(dx, dz) || 1;
+
+        this.ball.x = player.x + (dx / dist) * 1.5;
+        this.ball.z = player.z + (dz / dist) * 1.5;
+        this.ball.y = 1.3;
+
+        const hawkSpeed = 38;
+        this.ball.vx = (dx / dist) * hawkSpeed;
+        this.ball.vz = (dz / dist) * hawkSpeed;
+        this.ball.vy = 4.0;
+
+        this.ball.isSpecialShot = true;
+        this.ball.specialType = 'hawkeye';
+        this.ball.specialShooter = player;
+        this.ball.lastShooter = player;
+        this.ball.lastKicker = player;
+
+        // Onda d'urto ad anello: spazza via i difensori vicini
+        oppTeam.forEach(opp => {
+          const dOpp = Math.hypot(opp.x - player.x, opp.z - player.z);
+          if (dOpp < 7.5) {
+            opp.vx = Math.sign(opp.x - player.x || 1) * 10;
+            opp.vz = Math.sign(opp.z - player.z || 1) * 10;
+            opp.isSliding = true;
+            opp.slideTimer = 1.2;
+          }
+        });
+        break;
+      }
+
+      case 'ento': { // CANNONE INFUOCATO
+        const dx = targetGoalX - player.x;
+        const dz = 0 - player.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        this.ball.x = player.x + (dx / dist) * 1.5;
+        this.ball.z = player.z + (dz / dist) * 1.5;
+        this.ball.y = 1.4;
+        this.ball.vx = (dx / dist) * 42;
+        this.ball.vz = (dz / dist) * 42;
+        this.ball.vy = 3.6;
+        this.ball.isSpecialShot = true;
+        this.ball.specialType = 'fire_cannon';
+        this.ball.specialShooter = player;
+        this.ball.lastShooter = player;
+        this.ball.lastKicker = player;
+        break;
+      }
+
+      case 'bubi':
+      case 'jona': { // TACKLE TERREMOTO / CARICA DEL GLADIATORE
+        oppTeam.forEach(opp => {
+          const d = Math.hypot(opp.x - player.x, opp.z - player.z);
+          if (d < 15) {
+            opp.isSliding = true;
+            opp.slideTimer = 2.0;
+            opp.cannotPickupTimer = 2.0;
+            opp.protectionTimer = 0;
+            opp.vx = Math.sign(opp.x - player.x || 1) * 12;
+            opp.vz = Math.sign(opp.z - player.z || 1) * 12;
+          }
+        });
+        this.ball.holder = player;
+        player.protectionTimer = 1.5;
+        sounds.playSlide();
+        break;
+      }
+
+      case 'matti': { // SCATTO FULMINEO
+        player.stamina = 100;
+        player.cannotPickupTimer = 0;
+        this.ball.holder = player;
+        player.protectionTimer = 2.0;
+        player.vx = Math.sign(targetGoalX - player.x) * 22;
+        break;
+      }
+
+      case 'jelmo': { // MURO INVALICABILE
+        this.goalShieldTeam = teamNum;
+        this.goalShieldTimer = 10.0;
+        sounds.playWhistle(false);
+        break;
+      }
+
+      default: { // Altri tiri speciali (Lollo, Roby, Pibe, Kri, Leon, Lindi)
+        const targetZ = (Math.random() > 0.5 ? 3.5 : -3.5);
+        const dx = targetGoalX - player.x;
+        const dz = targetZ - player.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        this.ball.x = player.x + (dx / dist) * 1.5;
+        this.ball.z = player.z + (dz / dist) * 1.5;
+        this.ball.y = 1.2;
+        const pwr = 36;
+        this.ball.vx = (dx / dist) * pwr;
+        this.ball.vz = (dz / dist) * pwr + (char.id === 'lollo' ? 8 : 0);
+        this.ball.vy = (char.id === 'pibe' ? 6.5 : 3.8);
+        this.ball.isSpecialShot = true;
+        this.ball.specialType = char.id;
+        this.ball.specialShooter = player;
+        this.ball.lastShooter = player;
+        this.ball.lastKicker = player;
+        break;
+      }
+    }
+
+    return true;
+  }
+
   // Fisica vettoriale della palla (rimbalzi, pali, gol)
   updateBall(dt) {
     if (this.ball.holder) {
@@ -1388,6 +1635,27 @@ export class FootballGame {
 
     // Gravità bilanciata
     this.ball.vy -= 16.0 * dt;
+
+    // Effetto Homing del Tiro dell'Occhio di Falco di Ara (Mario Strikers)
+    if (this.ball.isSpecialShot && this.ball.specialType === 'hawkeye') {
+      const targetGoalX = (this.ball.specialShooter && this.ball.specialShooter.team === 1) ? (this.FIELD_W / 2) : (-this.FIELD_W / 2);
+      const targetGoalZ = (this.ball.specialShooter && this.ball.specialShooter.z >= 0) ? (this.GOAL_W / 2 - 1.2) : (-this.GOAL_W / 2 + 1.2);
+      this.ball.vz += (targetGoalZ - this.ball.z) * 0.14;
+      if (this.ball.y < 2.0 && Math.abs(this.ball.x) < this.FIELD_W / 2 - 2) {
+        this.ball.vy += 0.8;
+      }
+    }
+
+    // Scudo del Portiere (Super di Jelmo)
+    if (this.goalShieldTimer > 0) {
+      this.goalShieldTimer -= dt;
+      const shieldGoalX = (this.goalShieldTeam === 1) ? -this.FIELD_W / 2 : this.FIELD_W / 2;
+      if (Math.abs(this.ball.x - shieldGoalX) < 7 && Math.abs(this.ball.z) < this.GOAL_W / 2 + 2) {
+        this.ball.vx = -Math.sign(shieldGoalX) * 24;
+        this.ball.vy = 4;
+        sounds.playPost();
+      }
+    }
 
     this.ball.x += this.ball.vx * dt;
     this.ball.y += this.ball.vy * dt;
@@ -1477,8 +1745,19 @@ export class FootballGame {
 
     sounds.playGoalCheer();
 
+    // Identifica con precisione il marcatore del gol
+    const attackingPlayers = (scoringTeam === 1) ? this.playersTeam1 : this.playersTeam2;
+    let scorer = this.ball.lastShooter || this.ball.lastKicker || this.ball.lastPossessor;
+    if (!scorer || scorer.team !== scoringTeam) {
+      scorer = attackingPlayers[0];
+    }
+    const isSpecialGoal = this.ball.isSpecialShot || false;
+
+    // Reset flag speciale
+    this.ball.isSpecialShot = false;
+
     if (this.options.onGoal) {
-      this.options.onGoal(scoringTeam, this.score);
+      this.options.onGoal(scoringTeam, this.score, scorer, isSpecialGoal);
     }
   }
 
@@ -1507,6 +1786,10 @@ export class FootballGame {
 
     // 2. Se in partita attiva
     if (this.state === 'playing') {
+      // Caricamento passivo Super Gauge stile Mario Strikers
+      this.chargeMeter(1, dt * 2.8);
+      this.chargeMeter(2, dt * 2.8);
+
       // Aggiorna timer partita
       this.matchTime = Math.max(0, this.matchTime - dt);
       if (this.matchTime <= 0) {
@@ -1603,7 +1886,7 @@ export class FootballGame {
     // 5. Render scena
     this.renderer.render(this.scene, this.camera);
 
-    // Callback per aggiornamento HUD (Scoreboard, Timer, Minimappa)
+    // Callback per aggiornamento HUD (Scoreboard, Timer, Minimappa, Super Gauge)
     if (this.options.onUpdateHUD) {
       this.options.onUpdateHUD({
         score: this.score,
@@ -1611,7 +1894,11 @@ export class FootballGame {
         ball: { x: this.ball.x, z: this.ball.z },
         p1: this.playersTeam1.map(p => ({ x: p.x, z: p.z, id: p.id, name: p.name })),
         p2: this.playersTeam2.map(p => ({ x: p.x, z: p.z, id: p.id, name: p.name })),
-        shotPower: this.input.shotPower
+        shotPower: this.input.shotPower,
+        specialMeter1: Math.floor(this.specialMeter1),
+        specialMeter2: Math.floor(this.specialMeter2),
+        specialReady1: this.specialMeter1 >= 100,
+        specialReady2: this.specialMeter2 >= 100
       });
     }
 
