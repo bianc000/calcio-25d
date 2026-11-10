@@ -1,6 +1,6 @@
 // Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.4';
-import { sounds } from './audio.js?v=2.4';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.8';
+import { sounds } from './audio.js?v=2.8';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -531,7 +531,7 @@ export class FootballGame {
     // 2. VERO VOLTO FOTOGRAFICO IN-GAME (Stile Mario Strikers / Bobblehead)
     // Mostra la reale foto dell'amico sempre rivolta alla telecamera con grandissima definizione
     const loader = new window.THREE.TextureLoader();
-    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=2.6`;
+    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=2.8`;
     const faceTex = loader.load(avatarPath);
     const faceMat = new window.THREE.SpriteMaterial({
       map: faceTex,

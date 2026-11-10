@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.6';
-import { FootballGame } from './game.js?v=2.6';
-import { NetworkManager } from './network.js?v=2.6';
-import { sounds } from './audio.js?v=2.6';
+import { CHARACTERS, getCharacterById } from './characters.js?v=2.8';
+import { FootballGame } from './game.js?v=2.8';
+import { NetworkManager } from './network.js?v=2.8';
+import { sounds } from './audio.js?v=2.8';
 
 class App {
   constructor() {
@@ -632,7 +632,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=2.6`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=2.8`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
