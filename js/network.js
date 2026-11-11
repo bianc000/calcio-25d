@@ -4,7 +4,7 @@ const RELAY_STORAGE_KEY = 'msoccer_relay_url';
 
 // URL pubblico del Cloudflare Workers Relay (es. 'wss://msoccer-relay.tuo-nome.workers.dev').
 // Quando impostato, tutti i giocatori usano automaticamente il relay WebSocket senza configurazioni NAT/TURN.
-export const DEFAULT_RELAY_URL = '';
+export const DEFAULT_RELAY_URL = 'wss://msoccer-relay.biancoanthony2000.workers.dev';
 
 export class NetworkManager {
   constructor(callbacks = {}) {
