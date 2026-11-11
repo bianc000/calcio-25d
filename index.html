@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>MSoccer - Calcio 2.5D Arcade Multiplayer</title>
-  <link rel="stylesheet" href="css/style.css?v=3.2">
+  <link rel="stylesheet" href="css/style.css?v=3.3">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>">
   
   <!-- Three.js e PeerJS (CDN affidabili e veloci) -->
@@ -103,17 +103,17 @@
           <span>🚀</span> Unisciti alla Partita
         </button>
 
-        <details class="turn-settings">
-          <summary>⚙️ Su 4G o Wi-Fi bloccato? Configura relay TURN (opzionale)</summary>
+        <details id="turn-settings-details" class="turn-settings">
+          <summary id="turn-summary-text">⚙️ Su 4G o Wi-Fi diversi bloccati? Configura relay TURN (opzionale)</summary>
           <div class="turn-settings-body">
             <p class="turn-help">
-              Su due Wi-Fi normali si connette senza nulla. Se il router o il 4G blocca la connessione diretta, incolla qui un server TURN gratuito (es. Metered OpenRelay o Twilio).
+              Su due Wi-Fi domestici si connette spesso in automatico. Se Wi-Fi universitario/aziendale o 4G/5G blocca il P2P diretto, incolla qui il link API gratuito di <strong>metered.ca/tools/openrelay</strong> (oppure server <code>turn:...</code> + credenziali).
             </p>
-            <input type="text" id="turn-url-input" class="turn-input" placeholder="turn:global.relay.metered.ca:80 o dominio.metered.live">
-            <input type="text" id="turn-user-input" class="turn-input" placeholder="Username TURN (o vuoto se Metered API Key)">
-            <input type="password" id="turn-pass-input" class="turn-input" placeholder="Password / API Key">
+            <input type="text" id="turn-url-input" class="turn-input" placeholder="https://tuoapp.metered.live/api/v1/turn/credentials?apiKey=... oppure turn:...">
+            <input type="text" id="turn-user-input" class="turn-input" placeholder="Username TURN (lascia vuoto se usi URL/dominio Metered)">
+            <input type="password" id="turn-pass-input" class="turn-input" placeholder="Password TURN / API Key">
             <div style="display: flex; gap: 8px; margin-top: 6px;">
-              <button type="button" id="btn-save-turn" class="btn btn-secondary" style="flex:1; padding:8px; font-size:1.1rem;">💾 Salva TURN</button>
+              <button type="button" id="btn-save-turn" class="btn btn-secondary" style="flex:1; padding:8px; font-size:1.1rem;">💾 Salva & Verifica TURN</button>
               <button type="button" id="btn-clear-turn" class="btn btn-secondary" style="padding:8px 12px; font-size:1.1rem;">🗑️</button>
             </div>
           </div>
@@ -364,6 +364,6 @@
   </div>
 
   <!-- Script Principale (ES Module) -->
-  <script type="module" src="js/app.js?v=3.2"></script>
+  <script type="module" src="js/app.js?v=3.3"></script>
 </body>
 </html>

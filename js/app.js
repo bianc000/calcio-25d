@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.2';
-import { FootballGame } from './game.js?v=3.2';
-import { NetworkManager } from './network.js?v=3.2';
-import { sounds } from './audio.js?v=3.2';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.3';
+import { FootballGame } from './game.js?v=3.3';
+import { NetworkManager } from './network.js?v=3.3';
+import { sounds } from './audio.js?v=3.3';
 
 const MODE_HINTS = {
   '1v1': '<strong>Stanza 1v1 (2 giocatori):</strong> Ognuno comanda tutta la propria squadra (cambio giocatore con Q / Spazio).',
@@ -84,11 +84,13 @@ class App {
     this.soundToggleBtn = document.getElementById('sound-toggle');
   }
 
-  showToast(msg) {
+  showToast(msg, durationMs) {
     if (!this.toastEl) return;
+    if (this._toastTimer) clearTimeout(this._toastTimer);
     this.toastEl.innerText = msg;
     this.toastEl.classList.add('show');
-    setTimeout(() => this.toastEl.classList.remove('show'), 3000);
+    const ms = durationMs ?? (String(msg || '').length > 70 ? 6000 : 3200);
+    this._toastTimer = setTimeout(() => this.toastEl.classList.remove('show'), ms);
   }
 
   bindEvents() {
@@ -139,17 +141,32 @@ class App {
     // Impostazioni opzionali Relay TURN (4G / Reti restrittive)
     const btnSaveTurn = document.getElementById('btn-save-turn');
     if (btnSaveTurn) {
-      btnSaveTurn.onclick = () => {
+      btnSaveTurn.onclick = async () => {
         const url = (document.getElementById('turn-url-input')?.value || '').trim();
         const user = (document.getElementById('turn-user-input')?.value || '').trim();
         const pass = (document.getElementById('turn-pass-input')?.value || '').trim();
         if (!url) {
-          this.showToast("Inserisci almeno l'URL del server TURN o dominio Metered.");
+          this.showToast("Inserisci almeno l'URL del server TURN o link Metered.");
           return;
         }
-        NetworkManager.saveTurnConfig({ url, user, pass });
-        sounds.playBeep(820, 0.05);
-        this.showToast("✅ Configurazione TURN salvata! Ora vale anche su 4G/Wi-Fi diversi.");
+        const candidateCfg = { url, user, pass };
+        btnSaveTurn.disabled = true;
+        btnSaveTurn.innerText = '⏳ Verifica TURN...';
+        try {
+          const { servers, error } = await NetworkManager.resolveCustomTurnServers(candidateCfg);
+          if (error) {
+            sounds.playBeep(260, 0.08);
+            this.showToast(`⚠️ ${error}`);
+            return;
+          }
+          NetworkManager.saveTurnConfig(candidateCfg);
+          this.refreshTurnStatusUI();
+          sounds.playBeep(820, 0.05);
+          this.showToast(`✅ Relay TURN attivo (${servers.length} server)! Ora rigenera la stanza o unisciti.`);
+        } finally {
+          btnSaveTurn.disabled = false;
+          btnSaveTurn.innerText = '💾 Salva & Verifica TURN';
+        }
       };
     }
 
@@ -426,6 +443,23 @@ class App {
     if (urlEl) urlEl.value = (cfg && cfg.url) ? cfg.url : '';
     if (userEl) userEl.value = (cfg && cfg.user) ? cfg.user : '';
     if (passEl) passEl.value = (cfg && cfg.pass) ? cfg.pass : '';
+    this.refreshTurnStatusUI();
+  }
+
+  refreshTurnStatusUI() {
+    const summaryEl = document.getElementById('turn-summary-text');
+    if (!summaryEl) return;
+    if (NetworkManager.hasTurnConfigured()) {
+      summaryEl.innerText = '⚙️ Relay TURN attivo ✅ (Wi-Fi diversi / 4G abilitato)';
+    } else {
+      summaryEl.innerText = '⚙️ Su 4G o Wi-Fi diversi bloccati? Configura relay TURN (opzionale)';
+    }
+  }
+
+  _openTurnSettingsIfUnconfigured() {
+    if (NetworkManager.hasTurnConfigured()) return;
+    const details = document.getElementById('turn-settings-details');
+    if (details) details.open = true;
   }
 
   _syncModePillsUI() {
@@ -752,6 +786,11 @@ class App {
         this.updateDraftSlots();
         this.showToast("⚠️ Un giocatore si è disconnesso (passato alla CPU).");
       },
+      onPeerNegotiationFailed: (peerId, err) => {
+        const msg = err && err.message ? err.message : 'Connessione P2P diretta fallita con un amico.';
+        this._openTurnSettingsIfUnconfigured();
+        this.showToast(`⚠️ ${msg}`);
+      },
       onData: (data, peerId) => this.handleNetworkData(data, peerId),
       onDisconnect: () => {
         this.resetOnlineLobbyUI();
@@ -759,12 +798,20 @@ class App {
       },
       onError: (err) => {
         this.resetOnlineLobbyUI();
-        this.showToast("Errore di rete: " + (err && err.message ? err.message : 'connessione fallita'));
+        const waitBox = document.getElementById('host-waiting-box');
+        if (waitBox && !this.net?.connected) waitBox.style.display = 'none';
+        const msg = err && err.message ? err.message : 'connessione fallita';
+        if (msg.includes('TURN') || msg.includes('NAT')) {
+          this._openTurnSettingsIfUnconfigured();
+        }
+        this.showToast("Errore di rete: " + msg);
       }
     });
 
     this.net.hostGame().catch(() => {
       this.resetOnlineLobbyUI();
+      const waitBox = document.getElementById('host-waiting-box');
+      if (waitBox) waitBox.style.display = 'none';
     });
   }
 
@@ -799,7 +846,11 @@ class App {
       },
       onError: (err) => {
         this.resetOnlineLobbyUI();
-        this.showToast("Impossibile connettersi: " + (err && err.message ? err.message : 'riprova'));
+        const msg = err && err.message ? err.message : 'riprova';
+        if (msg.includes('TURN') || msg.includes('NAT')) {
+          this._openTurnSettingsIfUnconfigured();
+        }
+        this.showToast("Impossibile connettersi: " + msg);
       }
     });
 
@@ -1353,7 +1404,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.2`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.3`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();

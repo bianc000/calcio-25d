@@ -12,13 +12,16 @@ export class NetworkManager {
     this.connected = false;
     this._connectTimeout = null;
     this._retryTimer = null;
+    this._hasTurnActive = false;
     this._baseStunServers = [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
+      { urls: 'stun:stun.cloudflare.com:3478' }
     ];
+  }
+
+  static hasTurnConfigured() {
+    const cfg = NetworkManager.getTurnConfig();
+    return Boolean(cfg && cfg.url);
   }
 
   static getTurnConfig() {
@@ -71,44 +74,113 @@ export class NetworkManager {
     return val;
   }
 
+  static async resolveCustomTurnServers(cfg) {
+    if (!cfg || !cfg.url) return { servers: [], error: null };
+    const rawUrl = String(cfg.url || '').trim();
+    const user = String(cfg.user || '').trim();
+    const pass = String(cfg.pass || '').trim();
+
+    // 1. JSON array di iceServers (incollato direttamente dalla dashboard TURN)
+    if (rawUrl.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawUrl);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter(s => s && s.urls);
+          if (valid.length > 0) return { servers: valid, error: null };
+        }
+      } catch (e) {
+        return { servers: [], error: 'JSON server TURN non valido.' };
+      }
+      return { servers: [], error: 'Array iceServers vuoto o non valido.' };
+    }
+
+    // 2. Endpoint Metered.live (supporta URL completo con apiKey o solo dominio + password)
+    if (rawUrl.includes('.metered.live')) {
+      try {
+        let fetchUrl = rawUrl;
+        if (!/^https?:\/\//i.test(fetchUrl)) {
+          fetchUrl = `https://${fetchUrl}`;
+        }
+        const parsedUrl = new URL(fetchUrl);
+        if (!parsedUrl.pathname || parsedUrl.pathname === '/') {
+          parsedUrl.pathname = '/api/v1/turn/credentials';
+        }
+        if (!parsedUrl.searchParams.get('apiKey') && pass) {
+          parsedUrl.searchParams.set('apiKey', pass);
+        }
+        if (!parsedUrl.searchParams.get('apiKey')) {
+          return { servers: [], error: 'Inserisci la API Key Metered nel campo Password/API Key.' };
+        }
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4000);
+        const resp = await fetch(parsedUrl.toString(), { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!resp.ok) {
+          return { servers: [], error: `Metered API ha risposto HTTP ${resp.status}. Controlla API Key.` };
+        }
+        const list = await resp.json();
+        if (Array.isArray(list) && list.length > 0) {
+          return { servers: list, error: null };
+        }
+        return { servers: [], error: 'Risposta Metered vuota.' };
+      } catch (e) {
+        return { servers: [], error: 'Impossibile contattare il server Metered TURN.' };
+      }
+    }
+
+    // 3. URL turn:/turns:/stun: (anche multipli separati da virgola) o host:porta
+    if (/^https?:\/\//i.test(rawUrl)) {
+      return { servers: [], error: 'URL TURN deve iniziare con turn:, turns: o essere un dominio .metered.live' };
+    }
+    const entries = rawUrl
+      .split(/[\s,]+/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => ((/^(turns?|stuns?):/i.test(part)) ? part : `turn:${part}`));
+
+    if (entries.length === 0) {
+      return { servers: [], error: 'URL TURN non valido.' };
+    }
+    const entry = { urls: entries.length === 1 ? entries[0] : entries };
+    if (user) entry.username = user;
+    if (pass) entry.credential = pass;
+    return { servers: [entry], error: null };
+  }
+
   async _resolveIceServers() {
     const servers = [...this._baseStunServers];
+    this._hasTurnActive = false;
     const cfg = NetworkManager.getTurnConfig();
     if (!cfg || !cfg.url) return servers;
 
-    // Supporto opzionale API dinamica Metered.live
-    if (cfg.url.includes('.metered.live') && cfg.pass) {
-      try {
-        const cleanDomain = cfg.url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 3500);
-        const resp = await fetch(
-          `https://${cleanDomain}/api/v1/turn/credentials?apiKey=${encodeURIComponent(cfg.pass)}`,
-          { signal: ctrl.signal }
-        );
-        clearTimeout(timer);
-        if (resp.ok) {
-          const list = await resp.json();
-          if (Array.isArray(list) && list.length > 0) {
-            return [...servers, ...list];
-          }
-        }
-      } catch (e) {
-        console.warn('[Network] Impossibile recuperare credenziali Metered TURN, uso STUN:', e);
-      }
+    const { servers: customServers, error } = await NetworkManager.resolveCustomTurnServers(cfg);
+    if (error) {
+      console.warn('[Network] Configurazione TURN ignorata:', error);
       return servers;
     }
-
-    // Configurazione manuale turn: / turns:
-    let urls = cfg.url;
-    if (!/^turns?:/i.test(urls) && !/^stuns?:/i.test(urls)) {
-      urls = `turn:${urls}`;
+    if (customServers.length > 0) {
+      this._hasTurnActive = customServers.some(s => {
+        const u = Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls || '');
+        return /^turns?:/i.test(u) || u.includes('turn:');
+      });
+      return [...servers, ...customServers];
     }
-    const entry = { urls };
-    if (cfg.user) entry.username = cfg.user;
-    if (cfg.pass) entry.credential = cfg.pass;
-    servers.push(entry);
     return servers;
+  }
+
+  _buildNegotiationError(isHostSide = false) {
+    if (this._hasTurnActive) {
+      return new Error(
+        isHostSide
+          ? 'Un amico non riesce a connettersi anche con il relay TURN. Verifica le credenziali TURN o rigenera la stanza.'
+          : 'Connessione fallita anche tramite relay TURN. Verifica le credenziali TURN salvate o chiedi all\'Host un nuovo codice.'
+      );
+    }
+    return new Error(
+      isHostSide
+        ? 'Un amico è bloccato dal NAT/Wi-Fi/4G (connessione P2P diretta fallita). Se siete su Wi-Fi diversi o 4G, configura il relay TURN gratuito qui sotto.'
+        : 'Connessione P2P diretta bloccata tra queste due reti (Wi-Fi/4G diversi o rete bloccata). Configura il relay TURN gratuito nelle impostazioni qui sotto.'
+    );
   }
 
   _clearConnectTimeout() {
@@ -153,7 +225,7 @@ export class NetworkManager {
         this.peer = new window.Peer(code, {
           debug: 1,
           config: {
-            iceCandidatePoolSize: 10,
+            iceCandidatePoolSize: 2,
             iceServers
           }
         });
@@ -167,6 +239,7 @@ export class NetworkManager {
         this.peer.on('connection', (conn) => {
           const prev = this.conns.get(conn.peer);
           if (prev && prev !== conn) {
+            prev.__msSuperseded = true;
             try { prev.close(); } catch (_) {}
           }
           this.conns.set(conn.peer, conn);
@@ -185,8 +258,11 @@ export class NetworkManager {
           if (err.type === 'unavailable-id') {
             this.hostGame(this.generateRoomCode()).then(resolve).catch(reject);
           } else {
-            if (this.callbacks.onError) this.callbacks.onError(err);
-            reject(err);
+            const friendlyErr = (err && err.type === 'network')
+              ? new Error('Server di segnalazione temporaneamente irraggiungibile. Riprova tra poco.')
+              : err;
+            if (this.callbacks.onError) this.callbacks.onError(friendlyErr);
+            reject(friendlyErr);
           }
         });
       } catch (err) {
@@ -222,48 +298,78 @@ export class NetworkManager {
         this.peer = new window.Peer({
           debug: 1,
           config: {
-            iceCandidatePoolSize: 10,
+            iceCandidatePoolSize: 2,
             iceServers
           }
         });
 
         let settled = false;
+        let currentAttempt = 0;
+
+        const failAndAbort = (err) => {
+          if (settled) return;
+          settled = true;
+          this._clearConnectTimeout();
+          if (this.callbacks.onError) this.callbacks.onError(err);
+          this.disconnect();
+          reject(err);
+        };
 
         this._connectTimeout = setTimeout(() => {
           if (!this.connected && !settled) {
-            settled = true;
-            const timeoutErr = new Error(
-              `Impossibile raggiungere ${targetId}. Se siete su reti 4G/Wi-Fi bloccate, configura un relay TURN nelle impostazioni.`
-            );
-            if (this.callbacks.onError) this.callbacks.onError(timeoutErr);
-            this.disconnect();
-            reject(timeoutErr);
+            failAndAbort(this._buildNegotiationError(false));
           }
-        }, 18000);
+        }, 22000);
 
         const attemptConnect = (attemptNum) => {
           if (!this.peer || this.peer.destroyed || settled || this.connected) return;
+          currentAttempt = attemptNum;
+          if (this._retryTimer) {
+            clearTimeout(this._retryTimer);
+            this._retryTimer = null;
+          }
           if (this.conn && !this.conn.open) {
             const staleConn = this.conn;
+            staleConn.__msSuperseded = true;
             this.conn = null;
             try { staleConn.close(); } catch (_) {}
           }
-          this.conn = this.peer.connect(targetId, {
+          const nextConn = this.peer.connect(targetId, {
             reliable: true,
             serialization: 'json'
           });
-          this._setupPeerConnection(this.conn, () => {
-            if (!settled) {
-              settled = true;
-              resolve(targetId);
+          this.conn = nextConn;
+          this._setupPeerConnection(
+            nextConn,
+            () => {
+              if (!settled) {
+                settled = true;
+                resolve(targetId);
+              }
+            },
+            (connErr) => {
+              if (settled || this.connected || nextConn.__msSuperseded) return;
+              if (attemptNum === 1 && !this.peer.destroyed) {
+                nextConn.__msSuperseded = true;
+                if (this.conn === nextConn) this.conn = null;
+                try { nextConn.close(); } catch (_) {}
+                this._retryTimer = setTimeout(() => {
+                  attemptConnect(2);
+                }, 400);
+              } else {
+                const finalErr = (connErr && connErr.type === 'negotiation-failed')
+                  ? this._buildNegotiationError(false)
+                  : (connErr instanceof Error ? connErr : this._buildNegotiationError(false));
+                failAndAbort(finalErr);
+              }
             }
-          });
+          );
           if (attemptNum === 1) {
             this._retryTimer = setTimeout(() => {
-              if (!this.connected && !settled && this.peer && !this.peer.destroyed) {
+              if (!this.connected && !settled && currentAttempt === 1 && this.peer && !this.peer.destroyed) {
                 attemptConnect(2);
               }
-            }, 6500);
+            }, 9500);
           }
         };
 
@@ -273,17 +379,23 @@ export class NetworkManager {
 
         this.peer.on('error', (err) => {
           console.error('Peer join error:', err);
-          this._clearConnectTimeout();
-          let msg = err.message || 'Errore di connessione P2P';
-          if (err.type === 'peer-unavailable') {
-            msg = `Stanza "${targetId}" non trovata! Assicurati che l'Host abbia la stanza aperta.`;
+          if (err && err.type === 'peer-unavailable') {
+            failAndAbort(new Error(`Stanza "${targetId}" non trovata! Assicurati che l'Host abbia la stanza aperta.`));
+            return;
           }
-          const friendlyErr = new Error(msg);
-          if (this.callbacks.onError) this.callbacks.onError(friendlyErr);
-          if (!settled) {
-            settled = true;
-            reject(friendlyErr);
+          if (err && err.type === 'webrtc' && currentAttempt === 1 && !settled && !this.connected) {
+            if (this._retryTimer) {
+              clearTimeout(this._retryTimer);
+            }
+            this._retryTimer = setTimeout(() => {
+              attemptConnect(2);
+            }, 400);
+            return;
           }
+          const msg = (err && err.type === 'webrtc')
+            ? this._buildNegotiationError(false).message
+            : ((err && err.message) || 'Errore di connessione P2P');
+          failAndAbort(new Error(msg));
         });
       } catch (err) {
         this._clearConnectTimeout();
@@ -294,13 +406,12 @@ export class NetworkManager {
   }
 
   // Configura listener per singola DataConnection (Host multi-client e Client singolo)
-  _setupPeerConnection(activeConn, onOpenExtra = null) {
+  _setupPeerConnection(activeConn, onOpenExtra = null, onAttemptFail = null) {
     if (!activeConn) return;
     const remotePeerId = activeConn.peer;
     let opened = false;
-    let iceRetried = false;
 
-    const isCurrentConn = () => (this.isHost
+    const isCurrentConn = () => !activeConn.__msSuperseded && (this.isHost
       ? this.conns.get(remotePeerId) === activeConn
       : this.conn === activeConn);
 
@@ -332,6 +443,7 @@ export class NetworkManager {
     });
 
     activeConn.on('close', () => {
+      if (activeConn.__msSuperseded) return;
       if (this.isHost) {
         if (this.conns.get(remotePeerId) === activeConn) {
           this.conns.delete(remotePeerId);
@@ -347,9 +459,13 @@ export class NetworkManager {
       } else if (this.conn === activeConn) {
         const wasConnected = this.connected;
         this.connected = false;
-        this._clearConnectTimeout();
-        if (wasConnected && this.callbacks.onDisconnect) {
-          this.callbacks.onDisconnect(remotePeerId);
+        if (wasConnected) {
+          this._clearConnectTimeout();
+          if (this.callbacks.onDisconnect) {
+            this.callbacks.onDisconnect(remotePeerId);
+          }
+        } else if (!opened && onAttemptFail) {
+          onAttemptFail(new Error('negotiation-failed'));
         }
       }
     });
@@ -357,8 +473,37 @@ export class NetworkManager {
     activeConn.on('error', (err) => {
       if (!isCurrentConn()) return;
       console.error('Connection error:', remotePeerId, err);
+
+      if (err && err.type === 'connection-closed') {
+        return;
+      }
+
+      const isNegotiationFailed = err && err.type === 'negotiation-failed';
+      if (this.isHost) {
+        if (this.conns.get(remotePeerId) === activeConn) {
+          this.conns.delete(remotePeerId);
+        }
+        this.connected = this.getConnectedPeerCount() > 0;
+        if (isNegotiationFailed) {
+          const friendly = this._buildNegotiationError(true);
+          if (this.callbacks.onPeerNegotiationFailed) {
+            this.callbacks.onPeerNegotiationFailed(remotePeerId, friendly);
+          } else if (this.callbacks.onError && !this.connected) {
+            this.callbacks.onError(friendly);
+          }
+          return;
+        }
+        if (this.callbacks.onError) this.callbacks.onError(err);
+        return;
+      }
+
+      if (onAttemptFail && !opened) {
+        onAttemptFail(err);
+        return;
+      }
       this._clearConnectTimeout();
-      if (this.callbacks.onError) this.callbacks.onError(err);
+      const friendlyErr = isNegotiationFailed ? this._buildNegotiationError(false) : err;
+      if (this.callbacks.onError) this.callbacks.onError(friendlyErr);
     });
 
     const attachIceMonitor = () => {
@@ -367,19 +512,19 @@ export class NetworkManager {
       pc.__msIceMonitored = true;
       pc.addEventListener('iceconnectionstatechange', () => {
         if (!isCurrentConn()) return;
-        const state = pc.iceConnectionState;
-        if (state === 'failed') {
-          if (!iceRetried && typeof pc.restartIce === 'function') {
-            iceRetried = true;
-            try { pc.restartIce(); } catch (_) {}
-            return;
-          }
-          if (!opened) {
-            this._clearConnectTimeout();
-            const iceErr = new Error(
-              'Connessione diretta bloccata da NAT/4G. Configura un relay TURN nelle impostazioni di rete.'
-            );
-            if (this.callbacks.onError) this.callbacks.onError(iceErr);
+        if (pc.iceConnectionState === 'failed' && !opened) {
+          if (this.isHost) {
+            if (this.conns.get(remotePeerId) === activeConn) {
+              this.conns.delete(remotePeerId);
+            }
+            this.connected = this.getConnectedPeerCount() > 0;
+            if (this.callbacks.onPeerNegotiationFailed) {
+              this.callbacks.onPeerNegotiationFailed(remotePeerId, this._buildNegotiationError(true));
+            }
+          } else if (onAttemptFail) {
+            const failErr = new Error('negotiation-failed');
+            failErr.type = 'negotiation-failed';
+            onAttemptFail(failErr);
           }
         }
       });
@@ -420,10 +565,12 @@ export class NetworkManager {
   disconnect() {
     this._clearConnectTimeout();
     this.conns.forEach((conn) => {
+      conn.__msSuperseded = true;
       try { conn.close(); } catch (_) {}
     });
     this.conns.clear();
     if (this.conn) {
+      this.conn.__msSuperseded = true;
       try { this.conn.close(); } catch (_) {}
       this.conn = null;
     }
