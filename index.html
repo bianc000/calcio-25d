@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>MSoccer - Calcio 2.5D Arcade Multiplayer</title>
-  <link rel="stylesheet" href="css/style.css?v=3.1">
+  <link rel="stylesheet" href="css/style.css?v=3.2">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>">
   
   <!-- Three.js e PeerJS (CDN affidabili e veloci) -->
@@ -29,32 +29,14 @@
   <div id="main-menu" class="modal-screen interactive">
     <div class="menu-box">
       <h1 class="title-glow">MSoccer</h1>
-      <div class="subtitle">Multiplayer Arcade 1v1 • 2v2 • 3v3</div>
-
-      <div class="mode-selector" id="menu-mode-selector" role="group" aria-label="Modalità di controllo">
-        <button type="button" class="mode-pill active" data-mode="1v1">
-          <span class="mode-title">1v1</span>
-          <span class="mode-sub">Comandi Tutti</span>
-        </button>
-        <button type="button" class="mode-pill" data-mode="2v2">
-          <span class="mode-title">2v2</span>
-          <span class="mode-sub">Portiere CPU</span>
-        </button>
-        <button type="button" class="mode-pill" data-mode="3v3">
-          <span class="mode-title">3v3</span>
-          <span class="mode-sub">1 Giocatore</span>
-        </button>
-      </div>
-      <div id="mode-hint-menu" class="mode-hint">
-        1v1: ciascun giocatore controlla tutta la sua squadra (puoi cambiare giocatore).
-      </div>
+      <div class="subtitle">Arcade Soccer 3D • Locale & Online</div>
 
       <div class="btn-group">
         <button id="btn-play-cpu" class="btn btn-primary">
-          <span>⚽</span> Partita vs CPU
+          <span>⚽</span> Partita vs CPU (Tutta la Squadra)
         </button>
         <button id="btn-play-online" class="btn btn-accent">
-          <span>🌐</span> Gioca Online con Amici
+          <span>🌐</span> Gioca Online (1v1 • 2v2 • 3v3)
         </button>
         <button id="btn-rules" class="btn">
           <span>📖</span> Comandi e Regole
@@ -71,7 +53,7 @@
   <div id="online-modal" class="modal-screen hidden interactive">
     <div class="menu-box">
       <h2 style="font-size: 2.8rem; color: var(--primary);">STANZA MULTIPLAYER</h2>
-      <div class="subtitle">Scegli il formato e sfida gli amici online</div>
+      <div class="subtitle">Scegli il formato stanza online e sfida gli amici</div>
 
       <div class="lobby-inputs">
         <div class="mode-selector" id="online-mode-selector" role="group" aria-label="Formato stanza online">
@@ -87,6 +69,9 @@
             <span class="mode-title">3v3</span>
             <span class="mode-sub">6 gi. • 1 a testa</span>
           </button>
+        </div>
+        <div id="online-mode-hint" class="mode-hint">
+          <strong>Stanza 1v1 (2 giocatori):</strong> Ognuno comanda tutta la propria squadra (cambio con Q / Spazio).
         </div>
 
         <button id="btn-create-room" class="btn btn-primary">
@@ -379,6 +364,6 @@
   </div>
 
   <!-- Script Principale (ES Module) -->
-  <script type="module" src="js/app.js?v=3.1"></script>
+  <script type="module" src="js/app.js?v=3.2"></script>
 </body>
 </html>

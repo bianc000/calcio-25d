@@ -1,13 +1,13 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.1';
-import { FootballGame } from './game.js?v=3.1';
-import { NetworkManager } from './network.js?v=3.1';
-import { sounds } from './audio.js?v=3.1';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.2';
+import { FootballGame } from './game.js?v=3.2';
+import { NetworkManager } from './network.js?v=3.2';
+import { sounds } from './audio.js?v=3.2';
 
 const MODE_HINTS = {
-  '1v1': '<strong>1v1:</strong> Comandi tutta la tua squadra (3v3 con cambio giocatore Q / Spazio). Online: 2 giocatori (1 per squadra).',
-  '2v2': '<strong>2v2:</strong> Ogni giocatore comanda 1 solo personaggio fisso (DIF o ATT). Il Portiere è sempre CPU (max 4 giocatori online).',
-  '3v3': '<strong>3v3:</strong> Ognuno comanda 1 singolo personaggio fisso (POR, DIF o ATT — max 6 giocatori online). I posti vuoti restano CPU.'
+  '1v1': '<strong>Stanza 1v1 (2 giocatori):</strong> Ognuno comanda tutta la propria squadra (cambio giocatore con Q / Spazio).',
+  '2v2': '<strong>Stanza 2v2 (fino a 4 giocatori):</strong> Ogni giocatore comanda 1 solo personaggio fisso (DIF o ATT). Il Portiere è sempre CPU.',
+  '3v3': '<strong>Stanza 3v3 (fino a 6 giocatori):</strong> Ognuno comanda 1 singolo personaggio fisso (POR, DIF o ATT). I posti vuoti restano CPU.'
 };
 
 const SLOT_ROLES = [
@@ -24,6 +24,7 @@ class App {
     this.net = null;
     this.gameMode = 'cpu'; // 'cpu', 'online', 'local'
     this.controlMode = '1v1'; // '1v1', '2v2', '3v3'
+    this.onlineControlMode = '1v1';
     this.isHost = true;
     this.myPeerId = 'host';
     this.localTeam = 1;
@@ -91,10 +92,11 @@ class App {
   }
 
   bindEvents() {
-    // Menu
+    // Menu: contro CPU si comandano sempre tutti i giocatori della propria squadra
     document.getElementById('btn-play-cpu').onclick = () => {
       sounds.playBeep();
       this.gameMode = 'cpu';
+      this.controlMode = '1v1';
       this.isHost = true;
       this.myPeerId = 'local';
       this.assignDefaultSeats(false);
@@ -106,7 +108,7 @@ class App {
       this.openOnlineModal();
     };
 
-    // Selettori modalità (1v1 / 2v2 / 3v3) su Menu, Online Modal e Draft Host
+    // Selettori formato stanza online (1v1 / 2v2 / 3v3) su Modale Online e Draft Host
     document.querySelectorAll('.mode-pill[data-mode]').forEach(btn => {
       btn.onclick = () => {
         const mode = btn.dataset.mode;
@@ -116,6 +118,7 @@ class App {
           return;
         }
         sounds.playBeep(720, 0.04);
+        this.onlineControlMode = mode;
         this.setControlMode(mode, true);
       };
     });
@@ -426,21 +429,22 @@ class App {
   }
 
   _syncModePillsUI() {
+    const activeOnlineMode = (this.gameMode === 'online') ? this.controlMode : this.onlineControlMode;
     document.querySelectorAll('.mode-pill[data-mode]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.mode === this.controlMode);
+      btn.classList.toggle('active', btn.dataset.mode === activeOnlineMode);
       if (this.gameMode === 'online' && !this.isHost && btn.closest('#draft-mode-selector')) {
         btn.disabled = true;
       } else {
         btn.disabled = false;
       }
     });
-    const hintEl = document.getElementById('mode-hint-menu');
-    if (hintEl && MODE_HINTS[this.controlMode]) {
-      hintEl.innerHTML = MODE_HINTS[this.controlMode];
+    const hintEl = document.getElementById('online-mode-hint');
+    if (hintEl && MODE_HINTS[activeOnlineMode]) {
+      hintEl.innerHTML = MODE_HINTS[activeOnlineMode];
     }
     const hostModeLabel = document.getElementById('host-room-mode-label');
     if (hostModeLabel) {
-      hostModeLabel.innerText = this.controlMode;
+      hostModeLabel.innerText = activeOnlineMode;
     }
     this.updateOnlineBadges();
   }
@@ -497,15 +501,10 @@ class App {
       : [];
 
     if (this.gameMode === 'cpu') {
+      this.controlMode = '1v1';
       this.localTeam = 1;
-      if (this.controlMode === '1v1') {
-        this.localSlot = 2;
-        this.seats = { t1: ['local', 'local', 'local'], t2: [null, null, null], t2Peer: null };
-      } else {
-        if (this.controlMode === '2v2' && this.localSlot === 0) this.localSlot = 2;
-        this.seats = { t1: [null, null, null], t2: [null, null, null], t2Peer: null };
-        this.seats.t1[this.localSlot] = 'local';
-      }
+      this.localSlot = 2;
+      this.seats = { t1: ['local', 'local', 'local'], t2: [null, null, null], t2Peer: null };
       return;
     }
 
@@ -614,8 +613,9 @@ class App {
 
   setControlMode(mode, notify = true) {
     if (!MODE_HINTS[mode]) return;
+    this.onlineControlMode = mode;
     this.controlMode = mode;
-    if (this.gameMode === 'cpu' || this.isHost) {
+    if (this.gameMode === 'online' && this.isHost) {
       this.assignDefaultSeats(true);
     }
     this._syncModePillsUI();
@@ -638,6 +638,7 @@ class App {
   }
 
   openOnlineModal() {
+    this.controlMode = this.onlineControlMode;
     this.resetOnlineLobbyUI();
     this._syncModePillsUI();
     const waitBox = document.getElementById('host-waiting-box');
@@ -671,6 +672,7 @@ class App {
     }
 
     this.gameMode = 'online';
+    this.controlMode = this.onlineControlMode || '1v1';
     this.isHost = true;
     this.myPeerId = 'host';
     if (this.team1Picked.length !== 3) this.team1Picked = ['ento', 'lindi', 'bubi'];
@@ -828,7 +830,10 @@ class App {
 
     if (data.type === 'welcome') {
       this.myPeerId = data.peerId || this.myPeerId;
-      if (data.controlMode) this.controlMode = data.controlMode;
+      if (data.controlMode) {
+        this.controlMode = data.controlMode;
+        this.onlineControlMode = data.controlMode;
+      }
       if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
       if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
       if (data.seats) this.seats = data.seats;
@@ -850,7 +855,10 @@ class App {
       }
       this.showToast(`Stanza piena (${data.controlMode || ''} · max ${data.maxHumans || 2} giocatori).`);
     } else if (data.type === 'lobby_state') {
-      if (data.controlMode) this.controlMode = data.controlMode;
+      if (data.controlMode) {
+        this.controlMode = data.controlMode;
+        this.onlineControlMode = data.controlMode;
+      }
       if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
       if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
       if (data.seats) this.seats = data.seats;
@@ -906,7 +914,10 @@ class App {
       }
     } else if (data.type === 'start_match') {
       if (!this.isHost) {
-        if (data.controlMode) this.controlMode = data.controlMode;
+        if (data.controlMode) {
+          this.controlMode = data.controlMode;
+          this.onlineControlMode = data.controlMode;
+        }
         if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
         if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
         if (data.seats) this.seats = data.seats;
@@ -1003,6 +1014,10 @@ class App {
     this.onlineScreen.classList.add('hidden');
     this.draftScreen.classList.remove('hidden');
 
+    if (this.gameMode === 'cpu') {
+      this.controlMode = '1v1';
+    }
+
     // Default pre-selections (entrambe le parti hanno una base valida fin da subito)
     if (resetPicks) {
       if (this.gameMode === 'cpu' || this.isHost) {
@@ -1040,13 +1055,7 @@ class App {
         subtitleEl.innerText = `${this.controlMode} · Sei ${teamLabel} (${roleMeta.icon} ${roleMeta.label}). Clicca un ruolo libero o scegli il tuo personaggio!`;
       }
     } else {
-      if (this.controlMode === '1v1') {
-        subtitleEl.innerText = '1v1 vs CPU · Scegli 3 giocatori per la Squadra 1 (comandi tutta la squadra)';
-      } else if (this.controlMode === '2v2') {
-        subtitleEl.innerText = `2v2 vs CPU · Comandi SOLO ${roleMeta.icon} ${roleMeta.label} fisso (Portiere = 🤖 CPU). Clicca DIF o ATT per cambiare ruolo!`;
-      } else {
-        subtitleEl.innerText = `3v3 vs CPU · Comandi SOLO ${roleMeta.icon} ${roleMeta.label} fisso (compagni = 🤖 CPU). Clicca POR, DIF o ATT per cambiare ruolo!`;
-      }
+      subtitleEl.innerText = 'PARTITA vs CPU · Scegli i 3 giocatori della tua Squadra 1 (comandi tutta la squadra)';
     }
   }
 
@@ -1344,7 +1353,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.1`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.2`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
