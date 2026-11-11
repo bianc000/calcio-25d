@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.3';
-import { FootballGame } from './game.js?v=3.3';
-import { NetworkManager } from './network.js?v=3.3';
-import { sounds } from './audio.js?v=3.3';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.4';
+import { FootballGame } from './game.js?v=3.4';
+import { NetworkManager } from './network.js?v=3.4';
+import { sounds } from './audio.js?v=3.4';
 
 const MODE_HINTS = {
   '1v1': '<strong>Stanza 1v1 (2 giocatori):</strong> Ognuno comanda tutta la propria squadra (cambio giocatore con Q / Spazio).',
@@ -1404,7 +1404,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.3`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.4`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();

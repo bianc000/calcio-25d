@@ -1,6 +1,6 @@
 // Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.3';
-import { sounds } from './audio.js?v=3.3';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.4';
+import { sounds } from './audio.js?v=3.4';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -76,13 +76,13 @@ export class FootballGame {
     const height = this.container.clientHeight || window.innerHeight;
 
     this.scene = new window.THREE.Scene();
-    this.scene.background = new window.THREE.Color(0x131e29);
-    this.scene.fog = new window.THREE.FogExp2(0x131e29, 0.007);
+    this.scene.background = new window.THREE.Color(0x2f7dd4);
+    this.scene.fog = new window.THREE.FogExp2(0x8bc2f4, 0.0028);
 
-    // Camera 2.5D Mario Strikers dinamica, cinematografica e ravvicinata
-    this.camera = new window.THREE.PerspectiveCamera(46, width / height, 0.1, 1000);
-    this.camera.position.set(0, 38, 46);
-    this.camera.lookAt(0, 1.2, 0);
+    // Camera 2.5D ravvicinata: inquadra tutto il campetto e sullo sfondo gli edifici gialli, l'albero e la montagna
+    this.camera = new window.THREE.PerspectiveCamera(50, width / height, 0.1, 600);
+    this.camera.position.set(0, 36, 48.5);
+    this.camera.lookAt(0, 0.8, 0);
 
     // Renderer
     this.renderer = new window.THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -92,81 +92,137 @@ export class FootballGame {
     this.renderer.shadowMap.type = window.THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
-    // Luci
-    const ambient = new window.THREE.AmbientLight(0xffffff, 0.65);
-    this.scene.add(ambient);
+    // Luce diurna solare calda (cielo azzurro + rimbalzo erba)
+    const hemi = new window.THREE.HemisphereLight(0xaad8ff, 0x3b6327, 0.78);
+    this.scene.add(hemi);
 
-    // Riflettori da stadio
-    const floodlight1 = new window.THREE.DirectionalLight(0xfff5e6, 0.85);
-    floodlight1.position.set(30, 50, 40);
-    floodlight1.castShadow = true;
-    floodlight1.shadow.mapSize.width = 2048;
-    floodlight1.shadow.mapSize.height = 2048;
-    floodlight1.shadow.camera.near = 10;
-    floodlight1.shadow.camera.far = 120;
-    floodlight1.shadow.camera.left = -45;
-    floodlight1.shadow.camera.right = 45;
-    floodlight1.shadow.camera.top = 35;
-    floodlight1.shadow.camera.bottom = -35;
-    this.scene.add(floodlight1);
+    const sunLight = new window.THREE.DirectionalLight(0xfff4d6, 1.05);
+    sunLight.position.set(42, 48, 30);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 10;
+    sunLight.shadow.camera.far = 150;
+    sunLight.shadow.camera.left = -58;
+    sunLight.shadow.camera.right = 58;
+    sunLight.shadow.camera.top = 48;
+    sunLight.shadow.camera.bottom = -48;
+    sunLight.shadow.bias = -0.0005;
+    this.scene.add(sunLight);
 
-    const floodlight2 = new window.THREE.DirectionalLight(0xaad5ff, 0.35);
-    floodlight2.position.set(-30, 40, -40);
-    this.scene.add(floodlight2);
+    const fillLight = new window.THREE.DirectionalLight(0xcbe4ff, 0.25);
+    fillLight.position.set(-35, 30, -35);
+    this.scene.add(fillLight);
   }
 
   createStadium() {
-    // 1. Campo in erba con righe tagliate
+    this._createSkyDome();
+    this._createPitchSurface();
+    this._createSurroundingMeadow();
+
+    // Porte da calcio realistiche con pali bianchi e rete a maglia quadrata
+    this.createGoal(-this.FIELD_W / 2, true);
+    this.createGoal(this.FIELD_W / 2, false);
+
+    // Recinzione metallica da campetto, edifici gialli con porticato/scala, albero, montagne e bici
+    this._createCampettoFences();
+    this._createYellowBuildings();
+    this._createEnvironmentDetails();
+  }
+
+  _createSkyDome() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0.0, '#0f4fb2');
+    grad.addColorStop(0.48, '#2875d8');
+    grad.addColorStop(0.8, '#6bb1f3');
+    grad.addColorStop(1.0, '#9bd0fa');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const skyTex = new window.THREE.CanvasTexture(canvas);
+    const skyGeo = new window.THREE.SphereGeometry(320, 24, 16);
+    const skyMat = new window.THREE.MeshBasicMaterial({
+      map: skyTex,
+      side: window.THREE.BackSide,
+      fog: false
+    });
+    const sky = new window.THREE.Mesh(skyGeo, skyMat);
+    this.scene.add(sky);
+  }
+
+  _createPitchSurface() {
+    // Sintetico da campetto all'aperto: verde uniforme con grana naturale, leggera usura e righe bianche
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
     canvas.height = 1024;
     const ctx = canvas.getContext('2d');
 
-    // Strisce alternate verde chiaro e scuro
-    const stripes = 12;
+    ctx.fillStyle = '#286f2d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Bande molto tenui da sintetico al sole
+    const stripes = 10;
     const stripeW = canvas.width / stripes;
     for (let i = 0; i < stripes; i++) {
-      ctx.fillStyle = (i % 2 === 0) ? '#2d7e35' : '#358c3d';
+      ctx.fillStyle = (i % 2 === 0) ? 'rgba(52, 134, 56, 0.22)' : 'rgba(30, 88, 34, 0.18)';
       ctx.fillRect(i * stripeW, 0, stripeW, canvas.height);
     }
 
-    // Linee bianche del campo
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 14;
+    // Grana sintetica e leggere macchie d'usura vicino alle porte/centrocampo
+    for (let i = 0; i < 3200; i++) {
+      const gx = (i * 197) % canvas.width;
+      const gy = (i * 353 + 71) % canvas.height;
+      ctx.fillStyle = (i % 2 === 0) ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)';
+      ctx.fillRect(gx, gy, 3, 2);
+    }
+    const drawWear = (cx, cy, r) => {
+      const wg = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
+      wg.addColorStop(0, 'rgba(92, 114, 52, 0.22)');
+      wg.addColorStop(1, 'rgba(92, 114, 52, 0)');
+      ctx.fillStyle = wg;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    drawWear(110, 512, 90);
+    drawWear(914, 512, 90);
+    drawWear(512, 512, 65);
 
-    const padX = 50;
-    const padY = 50;
+    // Linee bianche del campetto
+    ctx.strokeStyle = 'rgba(248, 250, 252, 0.94)';
+    ctx.lineWidth = 11;
+
+    const padX = 46;
+    const padY = 46;
     const w = canvas.width - padX * 2;
     const h = canvas.height - padY * 2;
 
-    // Perimetro
     ctx.strokeRect(padX, padY, w, h);
 
-    // Linea di metà campo
     ctx.beginPath();
     ctx.moveTo(canvas.width / 2, padY);
     ctx.lineTo(canvas.width / 2, canvas.height - padY);
     ctx.stroke();
 
-    // Cerchio di centrocampo
     ctx.beginPath();
-    ctx.arc(canvas.width / 2, canvas.height / 2, 90, 0, Math.PI * 2);
+    ctx.arc(canvas.width / 2, canvas.height / 2, 88, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Punto centrale
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(canvas.width / 2, canvas.height / 2, 8, 0, Math.PI * 2);
+    ctx.arc(canvas.width / 2, canvas.height / 2, 7, 0, Math.PI * 2);
     ctx.fill();
 
-    // Aree di rigore (Sinistra e Destra)
-    const boxW = 160;
-    const boxH = 340;
+    const boxW = 155;
+    const boxH = 330;
     const boxY = (canvas.height - boxH) / 2;
     ctx.strokeRect(padX, boxY, boxW, boxH);
     ctx.strokeRect(canvas.width - padX - boxW, boxY, boxW, boxH);
 
-    // Texture Three.js
     const pitchTexture = new window.THREE.CanvasTexture(canvas);
     pitchTexture.wrapS = window.THREE.ClampToEdgeWrapping;
     pitchTexture.wrapT = window.THREE.ClampToEdgeWrapping;
@@ -174,93 +230,587 @@ export class FootballGame {
     const pitchGeo = new window.THREE.PlaneGeometry(this.FIELD_W, this.FIELD_H);
     const pitchMat = new window.THREE.MeshStandardMaterial({
       map: pitchTexture,
-      roughness: 0.8,
-      metalness: 0.1
+      roughness: 0.88,
+      metalness: 0.04
     });
     this.pitch = new window.THREE.Mesh(pitchGeo, pitchMat);
     this.pitch.rotation.x = -Math.PI / 2;
     this.pitch.receiveShadow = true;
     this.scene.add(this.pitch);
+  }
 
-    // Bordo esterno / Pista attorno al campo
-    const outerGeo = new window.THREE.PlaneGeometry(this.FIELD_W + 16, this.FIELD_H + 14);
-    const outerMat = new window.THREE.MeshStandardMaterial({ color: 0x194723, roughness: 0.9 });
+  _createSurroundingMeadow() {
+    // Prato naturale verde scuro e terra battuta attorno al campetto (come in primo piano nella foto)
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#335a24';
+    ctx.fillRect(0, 0, 512, 512);
+
+    for (let i = 0; i < 4500; i++) {
+      const gx = (i * 131 + 17) % 512;
+      const gy = (i * 277 + 43) % 512;
+      ctx.fillStyle = (i % 3 === 0) ? '#3f6c2c' : ((i % 3 === 1) ? '#2a4a1d' : '#4a5728');
+      ctx.fillRect(gx, gy, 3, 3);
+    }
+
+    const meadowTex = new window.THREE.CanvasTexture(canvas);
+    meadowTex.wrapS = window.THREE.RepeatWrapping;
+    meadowTex.wrapT = window.THREE.RepeatWrapping;
+    meadowTex.repeat.set(9, 8);
+    const outerGeo = new window.THREE.PlaneGeometry(360, 300);
+    const outerMat = new window.THREE.MeshStandardMaterial({
+      map: meadowTex,
+      roughness: 0.95,
+      metalness: 0.0
+    });
     const outer = new window.THREE.Mesh(outerGeo, outerMat);
     outer.rotation.x = -Math.PI / 2;
-    outer.position.y = -0.05;
+    outer.position.set(0, -0.06, -30);
     outer.receiveShadow = true;
     this.scene.add(outer);
 
-    // 2. Porte da Calcio (Pali bianchi e rete 3D)
-    this.createGoal(-this.FIELD_W / 2, true);  // Porta sinistra (Team 1)
-    this.createGoal(this.FIELD_W / 2, false);  // Porta destra (Team 2)
+    // Chiazza di terra battuta sotto le bici davanti al campetto
+    const dirtMesh = new window.THREE.Mesh(
+      new window.THREE.CircleGeometry(7.2, 20),
+      new window.THREE.MeshStandardMaterial({ color: 0x5c4731, roughness: 0.98 })
+    );
+    dirtMesh.rotation.x = -Math.PI / 2;
+    dirtMesh.scale.set(1.7, 0.75, 1);
+    dirtMesh.position.set(-8.5, -0.045, 26.8);
+    dirtMesh.receiveShadow = true;
+    this.scene.add(dirtMesh);
 
-    // 3. Cartelloni pubblicitari a bordo campo
-    this.createAdBoards();
+    // Cordolo basso di cemento grigio lungo il bordo del sintetico
+    const curbMat = new window.THREE.MeshStandardMaterial({ color: 0xaeb3ad, roughness: 0.9 });
+    const curbLongGeo = new window.THREE.BoxGeometry(this.FIELD_W + 4.4, 0.14, 0.7);
+    const curbNorth = new window.THREE.Mesh(curbLongGeo, curbMat);
+    curbNorth.position.set(0, 0.01, -this.FIELD_H / 2 - 1.85);
+    curbNorth.receiveShadow = true;
+    this.scene.add(curbNorth);
+
+    const curbSouth = new window.THREE.Mesh(curbLongGeo, curbMat);
+    curbSouth.position.set(0, 0.01, this.FIELD_H / 2 + 1.85);
+    curbSouth.receiveShadow = true;
+    this.scene.add(curbSouth);
+  }
+
+  _createMeshTexture(size = 64, lineColor = 'rgba(245,248,250,0.9)', lineWidth = 4) {
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeRect(0, 0, size, size);
+    const tex = new window.THREE.CanvasTexture(c);
+    tex.wrapS = window.THREE.RepeatWrapping;
+    tex.wrapT = window.THREE.RepeatWrapping;
+    return tex;
   }
 
   createGoal(xPos, isLeft) {
     const goalGroup = new window.THREE.Group();
-    const postMat = new window.THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.2 });
+    const postMat = new window.THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.35, metalness: 0.25 });
 
     const postRadius = 0.22;
-    const postGeo = new window.THREE.CylinderGeometry(postRadius, postRadius, this.GOAL_H, 16);
+    const postGeo = new window.THREE.CylinderGeometry(postRadius, postRadius, this.GOAL_H, 14);
 
-    // Palo 1 (Z negativo)
     const post1 = new window.THREE.Mesh(postGeo, postMat);
     post1.position.set(0, this.GOAL_H / 2, -this.GOAL_W / 2);
     post1.castShadow = true;
     goalGroup.add(post1);
 
-    // Palo 2 (Z positivo)
     const post2 = new window.THREE.Mesh(postGeo, postMat);
     post2.position.set(0, this.GOAL_H / 2, this.GOAL_W / 2);
     post2.castShadow = true;
     goalGroup.add(post2);
 
-    // Traversa superiore
-    const barGeo = new window.THREE.CylinderGeometry(postRadius, postRadius, this.GOAL_W, 16);
+    const barGeo = new window.THREE.CylinderGeometry(postRadius, postRadius, this.GOAL_W + 0.4, 14);
     const crossbar = new window.THREE.Mesh(barGeo, postMat);
     crossbar.rotation.x = Math.PI / 2;
     crossbar.position.set(0, this.GOAL_H, 0);
     crossbar.castShadow = true;
     goalGroup.add(crossbar);
 
-    // Rete posteriore
+    // Telaio posteriore a terra + sostegni laterali
     const dir = isLeft ? -1 : 1;
-    const netMat = new window.THREE.MeshStandardMaterial({
-      color: 0xeeeeee,
-      wireframe: true,
+    const thinMat = new window.THREE.MeshStandardMaterial({ color: 0xd8dee4, roughness: 0.4, metalness: 0.35 });
+    const groundBack = new window.THREE.Mesh(
+      new window.THREE.CylinderGeometry(0.11, 0.11, this.GOAL_W, 10),
+      thinMat
+    );
+    groundBack.rotation.x = Math.PI / 2;
+    groundBack.position.set(dir * this.GOAL_D, 0.11, 0);
+    goalGroup.add(groundBack);
+
+    const topBack = new window.THREE.Mesh(
+      new window.THREE.CylinderGeometry(0.11, 0.11, this.GOAL_W, 10),
+      thinMat
+    );
+    topBack.rotation.x = Math.PI / 2;
+    topBack.position.set(dir * (this.GOAL_D * 0.65), this.GOAL_H, 0);
+    goalGroup.add(topBack);
+
+    for (const zSide of [-this.GOAL_W / 2, this.GOAL_W / 2]) {
+      const groundSide = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.11, 0.11, this.GOAL_D, 10),
+        thinMat
+      );
+      groundSide.rotation.z = Math.PI / 2;
+      groundSide.position.set(dir * (this.GOAL_D / 2), 0.11, zSide);
+      goalGroup.add(groundSide);
+    }
+
+    // Rete bianca trasparente a maglia quadrata (fondo, tetto e fianchi)
+    const netTex = this._createMeshTexture(64, 'rgba(248, 250, 252, 0.92)', 5);
+    netTex.repeat.set(14, 5);
+    const netMat = new window.THREE.MeshBasicMaterial({
+      map: netTex,
       transparent: true,
-      opacity: 0.4
+      alphaTest: 0.15,
+      side: window.THREE.DoubleSide,
+      opacity: 0.72
     });
-    const netGeo = new window.THREE.BoxGeometry(this.GOAL_D, this.GOAL_H, this.GOAL_W);
-    const net = new window.THREE.Mesh(netGeo, netMat);
-    net.position.set(dir * (this.GOAL_D / 2), this.GOAL_H / 2, 0);
-    goalGroup.add(net);
+
+    const backNet = new window.THREE.Mesh(new window.THREE.PlaneGeometry(this.GOAL_W, this.GOAL_H), netMat);
+    backNet.rotation.y = Math.PI / 2;
+    backNet.position.set(dir * this.GOAL_D, this.GOAL_H / 2, 0);
+    goalGroup.add(backNet);
+
+    const topNetTex = netTex.clone();
+    topNetTex.needsUpdate = true;
+    topNetTex.repeat.set(14, 4);
+    const topNetMat = netMat.clone();
+    topNetMat.map = topNetTex;
+    const topNet = new window.THREE.Mesh(new window.THREE.PlaneGeometry(this.GOAL_D, this.GOAL_W), topNetMat);
+    topNet.rotation.x = Math.PI / 2;
+    topNet.position.set(dir * (this.GOAL_D / 2), this.GOAL_H, 0);
+    goalGroup.add(topNet);
+
+    const sideNetTex = netTex.clone();
+    sideNetTex.needsUpdate = true;
+    sideNetTex.repeat.set(5, 5);
+    const sideNetMat = netMat.clone();
+    sideNetMat.map = sideNetTex;
+    for (const zSide of [-this.GOAL_W / 2, this.GOAL_W / 2]) {
+      const sideNet = new window.THREE.Mesh(new window.THREE.PlaneGeometry(this.GOAL_D, this.GOAL_H), sideNetMat);
+      sideNet.position.set(dir * (this.GOAL_D / 2), this.GOAL_H / 2, zSide);
+      goalGroup.add(sideNet);
+    }
 
     goalGroup.position.set(xPos, 0, 0);
     this.scene.add(goalGroup);
   }
 
-  createAdBoards() {
-    const boardMat = new window.THREE.MeshStandardMaterial({ color: 0x0a1e36, roughness: 0.4 });
-    const bannerMat = new window.THREE.MeshBasicMaterial({ color: 0x00e1d9 });
+  _createCampettoFences() {
+    const postMat = new window.THREE.MeshStandardMaterial({ color: 0xa6b0b8, roughness: 0.45, metalness: 0.55 });
+    const railMat = new window.THREE.MeshStandardMaterial({ color: 0x9aa4ac, roughness: 0.5, metalness: 0.5 });
 
-    // Bordo lungo superiore (Z negativo)
-    const topBoard = new window.THREE.Mesh(new window.THREE.BoxGeometry(this.FIELD_W + 6, 1.2, 0.6), boardMat);
-    topBoard.position.set(0, 0.6, -this.FIELD_H / 2 - 2);
-    this.scene.add(topBoard);
+    const fenceTexNorth = this._createMeshTexture(32, 'rgba(215, 224, 232, 0.72)', 3);
+    fenceTexNorth.repeat.set(65, 5);
+    const fenceMeshMat = new window.THREE.MeshBasicMaterial({
+      map: fenceTexNorth,
+      transparent: true,
+      alphaTest: 0.12,
+      side: window.THREE.DoubleSide,
+      opacity: 0.58
+    });
 
-    // Striscia LED luminosa
-    const topLed = new window.THREE.Mesh(new window.THREE.BoxGeometry(this.FIELD_W + 5.5, 0.8, 0.65), bannerMat);
-    topLed.position.set(0, 0.6, -this.FIELD_H / 2 - 2);
-    this.scene.add(topLed);
+    const northZ = -this.FIELD_H / 2 - 1.9;
+    const southZ = this.FIELD_H / 2 + 1.9;
+    const westX = -this.FIELD_W / 2 - 4.8;
+    const eastX = this.FIELD_W / 2 + 4.8;
+    const spanX = eastX - westX;
+    const spanZ = southZ - northZ;
 
-    // Bordo lungo inferiore (Z positivo)
-    const bottomBoard = new window.THREE.Mesh(new window.THREE.BoxGeometry(this.FIELD_W + 6, 1.2, 0.6), boardMat);
-    bottomBoard.position.set(0, 0.6, this.FIELD_H / 2 + 2);
-    this.scene.add(bottomBoard);
+    // 1. Rete alta lato Nord (-Z, davanti agli edifici)
+    const northH = 4.4;
+    const northNet = new window.THREE.Mesh(new window.THREE.PlaneGeometry(spanX, northH), fenceMeshMat);
+    northNet.position.set(0, northH / 2, northZ);
+    this.scene.add(northNet);
+
+    const northTopRail = new window.THREE.Mesh(new window.THREE.BoxGeometry(spanX, 0.1, 0.1), railMat);
+    northTopRail.position.set(0, northH, northZ);
+    this.scene.add(northTopRail);
+
+    const northPostGeo = new window.THREE.CylinderGeometry(0.12, 0.12, northH + 0.15, 8);
+    for (let x = westX; x <= eastX + 0.1; x += 6.5) {
+      const p = new window.THREE.Mesh(northPostGeo, postMat);
+      p.position.set(x, northH / 2, northZ);
+      p.castShadow = true;
+      this.scene.add(p);
+    }
+
+    // 2. Reti parapalloni alte ai lati dietro le porte (-X e +X)
+    const endH = 6.2;
+    const endFenceTex = this._createMeshTexture(32, 'rgba(215, 224, 232, 0.72)', 3);
+    endFenceTex.repeat.set(40, 7);
+    const endMeshMat = fenceMeshMat.clone();
+    endMeshMat.map = endFenceTex;
+
+    const endPostGeo = new window.THREE.CylinderGeometry(0.13, 0.13, endH + 0.2, 8);
+    for (const xSide of [westX, eastX]) {
+      const endNet = new window.THREE.Mesh(new window.THREE.PlaneGeometry(spanZ, endH), endMeshMat);
+      endNet.rotation.y = Math.PI / 2;
+      endNet.position.set(xSide, endH / 2, 0);
+      this.scene.add(endNet);
+
+      for (let z = northZ; z <= southZ + 0.1; z += 7.5) {
+        const p = new window.THREE.Mesh(endPostGeo, postMat);
+        p.position.set(xSide, endH / 2, z);
+        p.castShadow = true;
+        this.scene.add(p);
+      }
+    }
+
+    // 3. Recinzione bassa e molto trasparente lato Sud (+Z) per non coprire giocatori e palla
+    const southH = 1.25;
+    const southTex = this._createMeshTexture(32, 'rgba(210, 220, 228, 0.45)', 3);
+    southTex.repeat.set(60, 2);
+    const southMat = new window.THREE.MeshBasicMaterial({
+      map: southTex,
+      transparent: true,
+      alphaTest: 0.1,
+      side: window.THREE.DoubleSide,
+      opacity: 0.26
+    });
+    const southNet = new window.THREE.Mesh(new window.THREE.PlaneGeometry(spanX, southH), southMat);
+    southNet.position.set(0, southH / 2, southZ);
+    this.scene.add(southNet);
+
+    const southPostGeo = new window.THREE.CylinderGeometry(0.09, 0.09, southH + 0.1, 6);
+    for (let x = westX; x <= eastX + 0.1; x += 11) {
+      const p = new window.THREE.Mesh(southPostGeo, postMat);
+      p.position.set(x, southH / 2, southZ);
+      this.scene.add(p);
+    }
+
+    // Tre pali verticali bianchi sul lato sinistro esterno (come nella foto)
+    const poleMat = new window.THREE.MeshStandardMaterial({ color: 0xeaf0f5, roughness: 0.4 });
+    for (let i = 0; i < 3; i++) {
+      const pole = new window.THREE.Mesh(new window.THREE.CylinderGeometry(0.11, 0.14, 12.5, 8), poleMat);
+      pole.position.set(westX - 3.2 - i * 2.2, 6.25, 4 - i * 4.2);
+      pole.castShadow = true;
+      this.scene.add(pole);
+    }
+  }
+
+  _createYellowBuildings() {
+    // 1. Lungo edificio giallo principale a 2 piani dietro il lato Nord (-Z)
+    const wallColor = 0xe1be2e;
+    const wallShadeColor = 0xcfb028;
+    const wallMat = new window.THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.85 });
+    const gableMat = new window.THREE.MeshStandardMaterial({ color: wallShadeColor, roughness: 0.85 });
+    const roofMat = new window.THREE.MeshStandardMaterial({ color: 0x563222, roughness: 0.9 });
+    const trimMat = new window.THREE.MeshStandardMaterial({ color: 0xf4f2ec, roughness: 0.6 });
+    const glassMat = new window.THREE.MeshStandardMaterial({ color: 0x1c2733, roughness: 0.3, metalness: 0.2 });
+
+    const mainGroup = new window.THREE.Group();
+    const bW = 54;
+    const bH = 10.6;
+    const bD = 14;
+
+    const mainBody = new window.THREE.Mesh(new window.THREE.BoxGeometry(bW, bH, bD), wallMat);
+    mainBody.position.set(0, bH / 2, 0);
+    mainBody.castShadow = true;
+    mainBody.receiveShadow = true;
+    mainGroup.add(mainBody);
+
+    // Tetto a due falde con cornicione scuro + timpani triangolari laterali
+    const roofSlopeGeo = new window.THREE.BoxGeometry(bW + 1.8, 0.45, 8.6);
+    const roofFront = new window.THREE.Mesh(roofSlopeGeo, roofMat);
+    roofFront.position.set(0, bH + 1.45, 3.85);
+    roofFront.rotation.x = 0.36;
+    roofFront.castShadow = true;
+    mainGroup.add(roofFront);
+
+    const roofBack = new window.THREE.Mesh(roofSlopeGeo, roofMat);
+    roofBack.position.set(0, bH + 1.45, -3.85);
+    roofBack.rotation.x = -0.36;
+    mainGroup.add(roofBack);
+
+    const gableShape = new window.THREE.Shape();
+    gableShape.moveTo(-bD / 2, 0);
+    gableShape.lineTo(bD / 2, 0);
+    gableShape.lineTo(0, 3.0);
+    gableShape.closePath();
+    const gableGeo = new window.THREE.ExtrudeGeometry(gableShape, { depth: bW - 0.1, bevelEnabled: false });
+    gableGeo.rotateY(Math.PI / 2);
+    const gableMesh = new window.THREE.Mesh(gableGeo, gableMat);
+    gableMesh.position.set(-bW / 2 + 0.05, bH, 0);
+    mainGroup.add(gableMesh);
+
+    // Finestre a due piani sulla facciata lunga (cornice bianca + vetro scuro)
+    const addWindow = (parent, x, y, z, w = 1.65, h = 1.9, rotY = 0) => {
+      const winGroup = new window.THREE.Group();
+      const frame = new window.THREE.Mesh(new window.THREE.BoxGeometry(w + 0.28, h + 0.28, 0.12), trimMat);
+      const pane = new window.THREE.Mesh(new window.THREE.BoxGeometry(w, h, 0.16), glassMat);
+      const mullion = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.1, h, 0.18), trimMat);
+      winGroup.add(frame, pane, mullion);
+      winGroup.position.set(x, y, z);
+      winGroup.rotation.y = rotY;
+      parent.add(winGroup);
+    };
+
+    const windowXs = [-23, -20.5, -18, -14, -11.5, -9, -5, -2.5, 0, 4, 6.5, 9, 13, 15.5, 19.5, 22];
+    for (const wx of windowXs) {
+      addWindow(mainGroup, wx, 6.8, bD / 2 + 0.04, 1.55, 1.85);
+      addWindow(mainGroup, wx, 3.1, bD / 2 + 0.04, 1.55, 1.85);
+    }
+    // Finestre sul timpano destro (visibili in prospettiva come nella foto)
+    for (const gz of [-3.2, 0, 3.2]) {
+      addWindow(mainGroup, bW / 2 + 0.04, 6.9, gz, 1.15, 1.65, Math.PI / 2);
+      addWindow(mainGroup, bW / 2 + 0.04, 3.2, gz, 1.15, 1.65, Math.PI / 2);
+    }
+
+    // Scala antincendio esterna nera (dettaglio caratteristico dell'edificio giallo nella foto)
+    const stairMat = new window.THREE.MeshStandardMaterial({ color: 0x22272c, roughness: 0.6, metalness: 0.5 });
+    const stairGroup = new window.THREE.Group();
+    const landingTop = new window.THREE.Mesh(new window.THREE.BoxGeometry(3.4, 0.2, 2.2), stairMat);
+    landingTop.position.set(16.5, 7.2, bD / 2 + 1.2);
+    const landingMid = new window.THREE.Mesh(new window.THREE.BoxGeometry(3.4, 0.2, 2.2), stairMat);
+    landingMid.position.set(16.5, 3.8, bD / 2 + 1.2);
+    const stairRail1 = new window.THREE.Mesh(new window.THREE.BoxGeometry(3.4, 0.9, 0.1), stairMat);
+    stairRail1.position.set(16.5, 7.7, bD / 2 + 2.25);
+    const stairRail2 = new window.THREE.Mesh(new window.THREE.BoxGeometry(3.4, 0.9, 0.1), stairMat);
+    stairRail2.position.set(16.5, 4.3, bD / 2 + 2.25);
+    const flight1 = new window.THREE.Mesh(new window.THREE.BoxGeometry(4.6, 0.22, 1.1), stairMat);
+    flight1.position.set(13.2, 5.5, bD / 2 + 1.2);
+    flight1.rotation.z = 0.66;
+    const flight2 = new window.THREE.Mesh(new window.THREE.BoxGeometry(4.6, 0.22, 1.1), stairMat);
+    flight2.position.set(13.2, 2.1, bD / 2 + 1.2);
+    flight2.rotation.z = 0.66;
+    for (const sx of [14.9, 18.1]) {
+      const col = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.18, 7.8, 0.18), stairMat);
+      col.position.set(sx, 3.9, bD / 2 + 2.2);
+      stairGroup.add(col);
+    }
+    stairGroup.add(landingTop, landingMid, stairRail1, stairRail2, flight1, flight2);
+    mainGroup.add(stairGroup);
+
+    mainGroup.position.set(17, 0, -35.5);
+    mainGroup.rotation.y = -0.055;
+    this.scene.add(mainGroup);
+
+    // 2. Ala sinistra con il Porticato ad Archi Bianchi
+    const wingGroup = new window.THREE.Group();
+    const wW = 36;
+    const wH = 9.4;
+    const wD = 12;
+
+    const wingUpper = new window.THREE.Mesh(new window.THREE.BoxGeometry(wW, 4.4, wD), wallMat);
+    wingUpper.position.set(0, 7.2, 0);
+    wingUpper.castShadow = true;
+    wingGroup.add(wingUpper);
+
+    const wingBackWall = new window.THREE.Mesh(new window.THREE.BoxGeometry(wW, 5.0, wD - 2.6), gableMat);
+    wingBackWall.position.set(0, 2.5, -1.2);
+    wingGroup.add(wingBackWall);
+
+    // Sfondo buio del porticato dietro gli archi
+    const arcadeShade = new window.THREE.Mesh(
+      new window.THREE.BoxGeometry(wW - 1.5, 4.6, 0.3),
+      new window.THREE.MeshStandardMaterial({ color: 0x262420, roughness: 0.95 })
+    );
+    arcadeShade.position.set(0, 2.3, wD / 2 - 2.3);
+    wingGroup.add(arcadeShade);
+
+    // Pilastri e archi bianchi del porticato
+    const archWhiteMat = new window.THREE.MeshStandardMaterial({ color: 0xf1efe8, roughness: 0.65 });
+    const archBays = 6;
+    const baySpan = (wW - 2) / archBays;
+    for (let i = 0; i <= archBays; i++) {
+      const px = -wW / 2 + 1 + i * baySpan;
+      const pillar = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.95, 4.9, 1.3), archWhiteMat);
+      pillar.position.set(px, 2.45, wD / 2 - 0.65);
+      pillar.castShadow = true;
+      wingGroup.add(pillar);
+
+      if (i < archBays) {
+        const cx = px + baySpan / 2;
+        const lintel = new window.THREE.Mesh(new window.THREE.BoxGeometry(baySpan, 0.95, 1.3), wallMat);
+        lintel.position.set(cx, 4.65, wD / 2 - 0.65);
+        wingGroup.add(lintel);
+
+        const archRim = new window.THREE.Mesh(
+          new window.THREE.TorusGeometry(baySpan * 0.42, 0.34, 8, 14, Math.PI),
+          archWhiteMat
+        );
+        archRim.position.set(cx, 3.25, wD / 2 - 0.15);
+        wingGroup.add(archRim);
+      }
+    }
+
+    // Finestre superiori con scuri bianchi sull'ala del porticato
+    for (let i = 0; i < 6; i++) {
+      const wx = -wW / 2 + 3.5 + i * 5.6;
+      addWindow(wingGroup, wx, 7.1, wD / 2 + 0.05, 1.6, 1.75);
+      const shutter = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.6, 1.75, 0.12), trimMat);
+      shutter.position.set(wx + 1.25, 7.1, wD / 2 + 0.06);
+      wingGroup.add(shutter);
+    }
+
+    const wingRoof = new window.THREE.Mesh(new window.THREE.BoxGeometry(wW + 1.6, 0.45, 7.6), roofMat);
+    wingRoof.position.set(0, wH + 1.25, 3.1);
+    wingRoof.rotation.x = 0.34;
+    wingRoof.castShadow = true;
+    wingGroup.add(wingRoof);
+
+    const wingRoofBack = new window.THREE.Mesh(new window.THREE.BoxGeometry(wW + 1.6, 0.45, 7.6), roofMat);
+    wingRoofBack.position.set(0, wH + 1.25, -3.1);
+    wingRoofBack.rotation.x = -0.34;
+    wingGroup.add(wingRoofBack);
+
+    wingGroup.position.set(-41, 0, -34.5);
+    wingGroup.rotation.y = 0.06;
+    this.scene.add(wingGroup);
+
+    // 3. Piccola palazzina gialla sullo sfondo a destra (come visibile a destra nella foto)
+    const sideHouse = new window.THREE.Group();
+    const shBody = new window.THREE.Mesh(new window.THREE.BoxGeometry(14, 9.5, 12), wallMat);
+    shBody.position.set(0, 4.75, 0);
+    const shRoof = new window.THREE.Mesh(new window.THREE.ConeGeometry(10.5, 3.2, 4), roofMat);
+    shRoof.rotation.y = Math.PI / 4;
+    shRoof.position.set(0, 11.1, 0);
+    sideHouse.add(shBody, shRoof);
+    addWindow(sideHouse, -2.5, 6.2, 6.04, 1.3, 1.6);
+    addWindow(sideHouse, 2.5, 6.2, 6.04, 1.3, 1.6);
+    sideHouse.position.set(59, 0, -45);
+    sideHouse.rotation.y = -0.25;
+    this.scene.add(sideHouse);
+  }
+
+  _createEnvironmentDetails() {
+    // 1. Grande albero frondoso tra le due ali gialle (come il grande albero centrale della foto)
+    const treeGroup = new window.THREE.Group();
+    const trunkMat = new window.THREE.MeshStandardMaterial({ color: 0x4b3522, roughness: 0.95 });
+    const leafDark = new window.THREE.MeshStandardMaterial({ color: 0x26481e, roughness: 0.9 });
+    const leafMid = new window.THREE.MeshStandardMaterial({ color: 0x335e26, roughness: 0.88 });
+
+    const trunk = new window.THREE.Mesh(new window.THREE.CylinderGeometry(0.95, 1.45, 7.5, 10), trunkMat);
+    trunk.position.set(0, 3.75, 0);
+    trunk.castShadow = true;
+    treeGroup.add(trunk);
+
+    const canopyBlobs = [
+      [0, 10.6, 0, 5.2, leafDark],
+      [-3.8, 9.4, 1.4, 4.1, leafMid],
+      [3.9, 9.8, 1.1, 4.3, leafDark],
+      [0.4, 13.4, -0.5, 4.2, leafMid],
+      [-2.4, 12.2, -1.5, 3.7, leafDark],
+      [2.8, 12.1, -1.2, 3.5, leafMid],
+      [-4.9, 11.1, -0.2, 3.2, leafDark],
+      [4.5, 11.4, -0.3, 3.1, leafMid]
+    ];
+    for (const [cx, cy, cz, cr, mat] of canopyBlobs) {
+      const blob = new window.THREE.Mesh(new window.THREE.IcosahedronGeometry(cr, 1), mat);
+      blob.scale.set(1.12, 0.92, 1.05);
+      blob.position.set(cx, cy, cz);
+      blob.castShadow = true;
+      treeGroup.add(blob);
+    }
+    treeGroup.position.set(-16.5, 0, -29.2);
+    this.scene.add(treeGroup);
+
+    // 2. Pendio montano morbido sullo sfondo a sinistra (come la montagna verde-azzurra in foto)
+    const mtnMatBack = new window.THREE.MeshStandardMaterial({ color: 0x45698a, roughness: 0.95, fog: true });
+    const mtnMatGreen = new window.THREE.MeshStandardMaterial({ color: 0x315037, roughness: 0.95, fog: true });
+
+    const ridgeShape = new window.THREE.Shape();
+    ridgeShape.moveTo(-140, 0);
+    ridgeShape.lineTo(-140, 34);
+    ridgeShape.lineTo(-96, 26);
+    ridgeShape.lineTo(-42, 13);
+    ridgeShape.lineTo(18, 2);
+    ridgeShape.lineTo(18, 0);
+    ridgeShape.closePath();
+    const ridgeGeo = new window.THREE.ExtrudeGeometry(ridgeShape, { depth: 18, bevelEnabled: false });
+    const ridgeMain = new window.THREE.Mesh(ridgeGeo, mtnMatBack);
+    ridgeMain.position.set(0, -1, -104);
+    this.scene.add(ridgeMain);
+
+    const foothillShape = new window.THREE.Shape();
+    foothillShape.moveTo(-120, 0);
+    foothillShape.lineTo(-120, 21);
+    foothillShape.lineTo(-68, 15);
+    foothillShape.lineTo(-18, 6);
+    foothillShape.lineTo(35, 0);
+    foothillShape.closePath();
+    const foothillGeo = new window.THREE.ExtrudeGeometry(foothillShape, { depth: 14, bevelEnabled: false });
+    const foothill = new window.THREE.Mesh(foothillGeo, mtnMatGreen);
+    foothill.position.set(0, -1, -86);
+    this.scene.add(foothill);
+
+    // 3. Siepe continua naturale lungo la rete nord e cespugli in primo piano a sinistra
+    const hedgeMat = new window.THREE.MeshStandardMaterial({ color: 0x26481d, roughness: 0.95 });
+    const sunlitBushMat = new window.THREE.MeshStandardMaterial({ color: 0x4b7728, roughness: 0.92 });
+
+    const hedgeBase = new window.THREE.Mesh(new window.THREE.BoxGeometry(82, 1.75, 2.1), hedgeMat);
+    hedgeBase.position.set(2, 0.85, -27.2);
+    hedgeBase.castShadow = true;
+    hedgeBase.receiveShadow = true;
+    this.scene.add(hedgeBase);
+    for (let x = -36; x <= 42; x += 3.1) {
+      const tuft = new window.THREE.Mesh(
+        new window.THREE.DodecahedronGeometry(0.9 + ((Math.abs(x) * 7) % 5) * 0.08, 1),
+        hedgeMat
+      );
+      tuft.scale.set(1.3, 0.75, 0.95);
+      tuft.position.set(x, 1.55 + ((Math.abs(x) * 3) % 3) * 0.08, -27.1 + ((x % 2) * 0.15));
+      this.scene.add(tuft);
+    }
+
+    for (let i = 0; i < 6; i++) {
+      const bush = new window.THREE.Mesh(new window.THREE.DodecahedronGeometry(1.6 + (i % 2) * 0.45, 1), sunlitBushMat);
+      bush.scale.set(1.5, 0.72, 1.1);
+      bush.position.set(-40 + i * 3.8, 0.75, 28.4 + (i % 2) * 0.9);
+      bush.castShadow = true;
+      this.scene.add(bush);
+    }
+
+    // 4. Due biciclette parcheggiate sul prato davanti al campetto (dettaglio fedele alla foto)
+    this._createParkedBike(-13.5, 26.2, 0.42);
+    this._createParkedBike(-3.2, 26.8, -0.35);
+  }
+
+  _createParkedBike(x, z, rotY) {
+    const bike = new window.THREE.Group();
+    const tireMat = new window.THREE.MeshStandardMaterial({ color: 0x16191d, roughness: 0.85 });
+    const frameMat = new window.THREE.MeshStandardMaterial({ color: 0x26323d, roughness: 0.45, metalness: 0.55 });
+    const rimMat = new window.THREE.MeshStandardMaterial({ color: 0xbfc7cf, roughness: 0.35, metalness: 0.7 });
+
+    const addWheel = (wx) => {
+      const tire = new window.THREE.Mesh(new window.THREE.TorusGeometry(0.46, 0.065, 8, 16), tireMat);
+      tire.position.set(wx, 0.48, 0);
+      tire.castShadow = true;
+      const rim = new window.THREE.Mesh(new window.THREE.TorusGeometry(0.37, 0.025, 6, 14), rimMat);
+      rim.position.set(wx, 0.48, 0);
+      bike.add(tire, rim);
+    };
+    addWheel(-0.68);
+    addWheel(0.68);
+
+    const topBar = new window.THREE.Mesh(new window.THREE.BoxGeometry(1.1, 0.06, 0.06), frameMat);
+    topBar.position.set(0, 0.88, 0);
+    const downBar = new window.THREE.Mesh(new window.THREE.BoxGeometry(1.15, 0.06, 0.06), frameMat);
+    downBar.position.set(0.05, 0.68, 0);
+    downBar.rotation.z = 0.42;
+    const fork = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.06, 0.78, 0.06), frameMat);
+    fork.position.set(0.58, 0.75, 0);
+    fork.rotation.z = 0.22;
+    const handle = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.06, 0.06, 0.58), frameMat);
+    handle.position.set(0.48, 1.12, 0);
+    const seat = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.28, 0.07, 0.14), tireMat);
+    seat.position.set(-0.34, 1.06, 0);
+
+    bike.add(topBar, downBar, fork, handle, seat);
+    bike.position.set(x, 0, z);
+    bike.rotation.y = rotY;
+    bike.rotation.x = 0.12;
+    this.scene.add(bike);
   }
 
   createBall() {
@@ -517,7 +1067,7 @@ export class FootballGame {
     // 2. VERO VOLTO FOTOGRAFICO IN-GAME (Stile Mario Strikers / Bobblehead)
     // Mostra la reale foto dell'amico sempre rivolta alla telecamera con grandissima definizione
     const loader = new window.THREE.TextureLoader();
-    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=3.3`;
+    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=3.4`;
     const faceTex = loader.load(avatarPath);
     const faceMat = new window.THREE.SpriteMaterial({
       map: faceTex,
@@ -2840,18 +3390,18 @@ export class FootballGame {
     renderTeamIndicators(this.playersTeam1, 1, this.activePlayerIdx1);
     renderTeamIndicators(this.playersTeam2, 2, this.activePlayerIdx2);
 
-    // 4. Telecamera dinamica 2.5D Mario Strikers (insegue palla + orientamento verso giocatore fisso in 2v2/3v3)
+    // 4. Telecamera dinamica 2.5D campetto all'aperto (inquadra tutto il campo + edifici gialli, albero e montagna)
     let focusX = this.ball.x * 0.45;
-    let focusZ = this.ball.z * 0.38;
-    let camHeight = 38;
-    let camZOffset = 38;
+    let focusZ = this.ball.z * 0.36;
+    let camHeight = 36;
+    let camZOffset = 48.5;
     if (this.controlMode !== '1v1') {
       const localP = this._getLocalControlledPlayer();
       if (localP) {
         focusX = this.ball.x * 0.34 + localP.x * 0.14;
         focusZ = this.ball.z * 0.28 + localP.z * 0.12;
-        camHeight = 41.5;
-        camZOffset = 41;
+        camHeight = 39.5;
+        camZOffset = 51.5;
       }
     }
     const targetCamX = focusX;
@@ -2859,7 +3409,7 @@ export class FootballGame {
     this.camera.position.x += (targetCamX - this.camera.position.x) * 3.5 * dt;
     this.camera.position.y += (camHeight - this.camera.position.y) * 2.5 * dt;
     this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.5 * dt;
-    this.camera.lookAt(focusX, 1.2, focusZ * 0.92);
+    this.camera.lookAt(focusX, 0.8, focusZ * 0.9);
 
     // Applicazione Camera Shake per impatto arcade
     if (this.cameraShake > 0.01) {
