@@ -1,0 +1,11 @@
+name = "msoccer-relay"
+main = "src/index.js"
+compatibility_date = "2026-04-07"
+
+[[durable_objects.bindings]]
+name = "ROOM_RELAY"
+class_name = "RoomRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomRelay"]

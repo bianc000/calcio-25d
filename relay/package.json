@@ -1,0 +1,13 @@
+{
+  "name": "msoccer-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Workers Durable Object WebSocket Relay for MSoccer multiplayer",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

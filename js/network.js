@@ -1,22 +1,117 @@
-// Modulo di Rete P2P WebRTC (Star Topology fino a 6 giocatori con PeerJS)
+// Modulo di Rete Multiplayer (Cloudflare WebSocket Relay + PeerJS WebRTC P2P fallback)
 const TURN_STORAGE_KEY = 'msoccer_turn_config';
+const RELAY_STORAGE_KEY = 'msoccer_relay_url';
+
+// URL pubblico del Cloudflare Workers Relay (es. 'wss://msoccer-relay.tuo-nome.workers.dev').
+// Quando impostato, tutti i giocatori usano automaticamente il relay WebSocket senza configurazioni NAT/TURN.
+export const DEFAULT_RELAY_URL = '';
 
 export class NetworkManager {
   constructor(callbacks = {}) {
     this.peer = null;
     this.conn = null;         // Usato dal Client (connessione verso Host)
-    this.conns = new Map();   // Usato dall'Host: peerId -> DataConnection
+    this.conns = new Map();   // Usato dall'Host: peerId -> DataConnection / Relay shim
+    this.relayPeers = new Set(); // Usato dall'Host in modalita WebSocket Relay
+    this.ws = null;
+    this.transport = 'peerjs'; // 'ws-relay' | 'peerjs'
     this.isHost = false;
     this.roomId = null;
     this.callbacks = callbacks;
     this.connected = false;
+    this._disposed = false;
     this._connectTimeout = null;
     this._retryTimer = null;
+    this._wsKeepaliveTimer = null;
     this._hasTurnActive = false;
     this._baseStunServers = [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' }
     ];
+  }
+
+  static getDefaultRelayUrl() {
+    return NetworkManager.normalizeRelayUrl(DEFAULT_RELAY_URL);
+  }
+
+  static normalizeRelayUrl(raw) {
+    let val = String(raw || '').trim();
+    if (!val) return '';
+    if (/^https:\/\//i.test(val)) {
+      val = 'wss://' + val.slice(8);
+    } else if (/^http:\/\//i.test(val)) {
+      val = 'ws://' + val.slice(7);
+    } else if (!/^(wss?|https?):\/\//i.test(val)) {
+      const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(val);
+      val = (isLocal ? 'ws://' : 'wss://') + val;
+    }
+    try {
+      const parsed = new URL(val);
+      if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return '';
+      let path = parsed.pathname.replace(/\/+$/, '');
+      if (path === '/ws') path = '';
+      return `${parsed.protocol}//${parsed.host}${path}`;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static getStoredRelayUrl() {
+    try {
+      return NetworkManager.normalizeRelayUrl(localStorage.getItem(RELAY_STORAGE_KEY) || '');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static getRelayUrl() {
+    return NetworkManager.getStoredRelayUrl() || NetworkManager.getDefaultRelayUrl();
+  }
+
+  static hasRelayConfigured() {
+    return Boolean(NetworkManager.getRelayUrl());
+  }
+
+  static saveRelayUrl(raw) {
+    const trimmed = String(raw || '').trim();
+    try {
+      if (!trimmed) {
+        localStorage.removeItem(RELAY_STORAGE_KEY);
+        return '';
+      }
+      const normalized = NetworkManager.normalizeRelayUrl(trimmed);
+      if (!normalized) return null;
+      localStorage.setItem(RELAY_STORAGE_KEY, normalized);
+      return normalized;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static extractInviteParams(rawInput) {
+    const raw = String(rawInput || '').trim();
+    let relayUrl = '';
+    if (raw) {
+      const relayMatch = raw.match(/[?&]relay=([^&#\s]+)/i);
+      if (relayMatch && relayMatch[1]) {
+        try {
+          relayUrl = NetworkManager.normalizeRelayUrl(decodeURIComponent(relayMatch[1]));
+        } catch (_) {
+          relayUrl = '';
+        }
+      }
+    }
+    let val = raw;
+    if (val) {
+      const roomMatch = val.match(/[?&]room=([A-Za-z0-9_-]+)/i);
+      if (roomMatch && roomMatch[1]) {
+        val = roomMatch[1];
+      }
+      val = val.toUpperCase().replace(/\s+/g, '');
+      if (/^[A-Z0-9]{4}$/.test(val)) {
+        val = `MS-${val}`;
+      }
+    }
+    return { roomCode: val, relayUrl };
   }
 
   static hasTurnConfigured() {
@@ -59,19 +154,7 @@ export class NetworkManager {
 
   // Normalizza codice stanza o link completo incollato dall'utente
   normalizeRoomCode(rawInput) {
-    let val = (rawInput || '').trim();
-    if (!val) return '';
-
-    const roomMatch = val.match(/[?&]room=([A-Za-z0-9_-]+)/i);
-    if (roomMatch && roomMatch[1]) {
-      val = roomMatch[1];
-    }
-
-    val = val.toUpperCase().replace(/\s+/g, '');
-    if (/^[A-Z0-9]{4}$/.test(val)) {
-      val = `MS-${val}`;
-    }
-    return val;
+    return NetworkManager.extractInviteParams(rawInput).roomCode;
   }
 
   static async resolveCustomTurnServers(cfg) {
@@ -194,7 +277,29 @@ export class NetworkManager {
     }
   }
 
+  getConnectedPeerIds() {
+    if (!this.isHost) {
+      return this.connected ? ['host'] : [];
+    }
+    if (this.transport === 'ws-relay') {
+      return (this.ws && this.ws.readyState === WebSocket.OPEN)
+        ? Array.from(this.relayPeers)
+        : [];
+    }
+    const ids = [];
+    this.conns.forEach((c, pid) => {
+      if (c && c.open) ids.push(pid);
+    });
+    return ids;
+  }
+
   getConnectedPeerCount() {
+    if (this.transport === 'ws-relay') {
+      if (this.isHost) {
+        return (this.ws && this.ws.readyState === WebSocket.OPEN) ? this.relayPeers.size : 0;
+      }
+      return (this.ws && this.ws.readyState === WebSocket.OPEN && this.connected) ? 1 : 0;
+    }
     if (this.isHost) {
       let count = 0;
       this.conns.forEach(c => {
@@ -205,9 +310,203 @@ export class NetworkManager {
     return (this.conn && this.conn.open) ? 1 : 0;
   }
 
+  _clearWsKeepalive() {
+    if (this._wsKeepaliveTimer) {
+      clearInterval(this._wsKeepaliveTimer);
+      this._wsKeepaliveTimer = null;
+    }
+  }
+
+  _startWsKeepalive(ws) {
+    this._clearWsKeepalive();
+    this._wsKeepaliveTimer = setInterval(() => {
+      if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ t: 'ping', ts: Date.now() }));
+        } catch (_) {}
+      } else {
+        this._clearWsKeepalive();
+      }
+    }, 25000);
+  }
+
+  _syncHostConnShim(peerId, present) {
+    if (present) {
+      this.conns.set(peerId, { peer: peerId, open: true, _wsRelay: true, close() {} });
+    } else {
+      this.conns.delete(peerId);
+    }
+  }
+
+  _closeActiveWs() {
+    this._clearWsKeepalive();
+    if (this.ws) {
+      this.ws.__msSuperseded = true;
+      try { this.ws.close(); } catch (_) {}
+      this.ws = null;
+    }
+    this.relayPeers.clear();
+  }
+
   // Inizializza come Host (accetta fino a 5 ospiti contemporaneamente per 1v1, 2v2 o 3v3)
-  async hostGame(customCode = null) {
+  async hostGame(customCode = null, options = {}) {
     this.disconnect();
+    this._disposed = false;
+
+    const customNormalized = this.normalizeRoomCode(customCode);
+    const fixedCode = customNormalized || null;
+    const relayUrl = NetworkManager.normalizeRelayUrl(options.relayUrl) || NetworkManager.getRelayUrl();
+
+    if (relayUrl) {
+      try {
+        return await this._hostViaRelay(relayUrl, fixedCode);
+      } catch (relayErr) {
+        if (this._disposed) throw relayErr;
+        console.warn('[Network] Relay WebSocket non disponibile, passo a PeerJS P2P:', relayErr?.message || relayErr);
+        this._closeActiveWs();
+        this.conns.clear();
+      }
+    }
+
+    return this._hostViaPeerJs(fixedCode);
+  }
+
+  async _hostViaRelay(relayUrl, fixedCode = null, attempt = 0) {
+    if (this._disposed) {
+      throw new Error('Connessione annullata.');
+    }
+
+    const code = fixedCode || this.generateRoomCode();
+    return new Promise((resolve, reject) => {
+      this.isHost = true;
+      this.transport = 'ws-relay';
+      this.roomId = code;
+      this.connected = false;
+      this.relayPeers.clear();
+      this.conns.clear();
+
+      let settled = false;
+      let handshakeTimer = null;
+      let ws = null;
+
+      const clearHandshake = () => {
+        if (handshakeTimer) {
+          clearTimeout(handshakeTimer);
+          handshakeTimer = null;
+        }
+      };
+
+      const failHandshake = (err) => {
+        if (settled) return;
+        settled = true;
+        clearHandshake();
+        if (ws) ws.__msSuperseded = true;
+        this._closeActiveWs();
+        reject(err instanceof Error ? err : new Error(String(err || 'Relay host error')));
+      };
+
+      try {
+        ws = new WebSocket(`${relayUrl}/ws?room=${encodeURIComponent(code)}&role=host`);
+        this.ws = ws;
+      } catch (err) {
+        failHandshake(err);
+        return;
+      }
+
+      handshakeTimer = setTimeout(() => {
+        failHandshake(new Error('Timeout connessione al relay WebSocket.'));
+      }, 4500);
+
+      ws.addEventListener('message', (ev) => {
+        if (ws.__msSuperseded || this._disposed) return;
+        let msg;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch (_) {
+          return;
+        }
+        if (!msg || typeof msg !== 'object') return;
+
+        if (msg.type === 'relay_ready') {
+          if (!settled) {
+            settled = true;
+            clearHandshake();
+            this.roomId = msg.roomId || code;
+            this._startWsKeepalive(ws);
+            if (this.callbacks.onHostReady) this.callbacks.onHostReady(this.roomId);
+            resolve(this.roomId);
+          }
+          return;
+        }
+
+        if (msg.type === 'relay_error') {
+          if (msg.code === 'room_taken' && !fixedCode && attempt < 3) {
+            settled = true;
+            clearHandshake();
+            ws.__msSuperseded = true;
+            try { ws.close(); } catch (_) {}
+            this._hostViaRelay(relayUrl, null, attempt + 1).then(resolve).catch(reject);
+            return;
+          }
+          const err = new Error(msg.message || 'Errore relay WebSocket.');
+          err.code = msg.code;
+          if (!settled) {
+            failHandshake(err);
+          } else if (this.callbacks.onError) {
+            this.callbacks.onError(err);
+          }
+          return;
+        }
+
+        if (msg.type === 'relay_peer_join' && msg.peerId) {
+          this.relayPeers.add(msg.peerId);
+          this._syncHostConnShim(msg.peerId, true);
+          this.connected = this.relayPeers.size > 0;
+          if (this.callbacks.onPeerConnect) this.callbacks.onPeerConnect(msg.peerId);
+          return;
+        }
+
+        if (msg.type === 'relay_peer_leave' && msg.peerId) {
+          const hadPeer = this.relayPeers.delete(msg.peerId);
+          this._syncHostConnShim(msg.peerId, false);
+          this.connected = this.relayPeers.size > 0;
+          if (hadPeer && this.callbacks.onPeerDisconnect) {
+            this.callbacks.onPeerDisconnect(msg.peerId);
+          }
+          return;
+        }
+
+        if (msg.t === 'd' && msg.d !== undefined) {
+          if (this.callbacks.onData) this.callbacks.onData(msg.d, msg.from || 'guest');
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        if (ws.__msSuperseded) return;
+        if (!settled) {
+          failHandshake(new Error('Impossibile contattare il relay WebSocket.'));
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        if (ws.__msSuperseded || ws.__msCloseHandled) return;
+        ws.__msCloseHandled = true;
+        clearHandshake();
+        this._clearWsKeepalive();
+        if (!settled) {
+          failHandshake(new Error('Connessione relay chiusa prima dell\'avvio.'));
+          return;
+        }
+        this.relayPeers.clear();
+        this.conns.clear();
+        this.connected = false;
+        if (this.ws === ws) this.ws = null;
+        if (this.callbacks.onDisconnect) this.callbacks.onDisconnect();
+      });
+    });
+  }
+
+  async _hostViaPeerJs(customCode = null) {
     if (!window.Peer) {
       const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
       if (this.callbacks.onError) this.callbacks.onError(err);
@@ -218,6 +517,7 @@ export class NetworkManager {
 
     return new Promise((resolve, reject) => {
       this.isHost = true;
+      this.transport = 'peerjs';
       const code = this.normalizeRoomCode(customCode) || this.generateRoomCode();
       this.roomId = code;
 
@@ -256,7 +556,7 @@ export class NetworkManager {
         this.peer.on('error', (err) => {
           console.error('Peer host error:', err);
           if (err.type === 'unavailable-id') {
-            this.hostGame(this.generateRoomCode()).then(resolve).catch(reject);
+            this._hostViaPeerJs(this.generateRoomCode()).then(resolve).catch(reject);
           } else {
             const friendlyErr = (err && err.type === 'network')
               ? new Error('Server di segnalazione temporaneamente irraggiungibile. Riprova tra poco.')
@@ -273,17 +573,164 @@ export class NetworkManager {
   }
 
   // Connettiti a una stanza esistente come Guest
-  async joinGame(roomCode) {
+  async joinGame(roomCode, options = {}) {
     this.disconnect();
-    if (!window.Peer) {
-      const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
+    this._disposed = false;
+
+    const parsed = NetworkManager.extractInviteParams(roomCode);
+    const targetId = parsed.roomCode;
+    if (!targetId) {
+      const err = new Error('Codice stanza non valido.');
       if (this.callbacks.onError) this.callbacks.onError(err);
       throw err;
     }
 
-    const targetId = this.normalizeRoomCode(roomCode);
-    if (!targetId) {
-      const err = new Error('Codice stanza non valido.');
+    const relayUrl = parsed.relayUrl
+      || NetworkManager.normalizeRelayUrl(options.relayUrl)
+      || NetworkManager.getRelayUrl();
+
+    if (relayUrl) {
+      try {
+        return await this._joinViaRelay(relayUrl, targetId);
+      } catch (relayErr) {
+        if (this._disposed) throw relayErr;
+        if (relayErr && relayErr.isRelayLogical) {
+          if (this.callbacks.onError) this.callbacks.onError(relayErr);
+          throw relayErr;
+        }
+        console.warn('[Network] Relay WebSocket non raggiungibile, provo PeerJS P2P:', relayErr?.message || relayErr);
+        this._closeActiveWs();
+      }
+    }
+
+    return this._joinViaPeerJs(targetId);
+  }
+
+  async _joinViaRelay(relayUrl, targetId) {
+    if (this._disposed) {
+      throw new Error('Connessione annullata.');
+    }
+
+    return new Promise((resolve, reject) => {
+      this.isHost = false;
+      this.transport = 'ws-relay';
+      this.roomId = targetId;
+      this.connected = false;
+
+      let settled = false;
+      let handshakeTimer = null;
+      let ws = null;
+
+      const clearHandshake = () => {
+        if (handshakeTimer) {
+          clearTimeout(handshakeTimer);
+          handshakeTimer = null;
+        }
+      };
+
+      const failHandshake = (err, isLogical = false) => {
+        if (settled) return;
+        settled = true;
+        clearHandshake();
+        if (ws) ws.__msSuperseded = true;
+        this._closeActiveWs();
+        const errObj = err instanceof Error ? err : new Error(String(err || 'Connessione relay fallita.'));
+        if (isLogical) errObj.isRelayLogical = true;
+        reject(errObj);
+      };
+
+      try {
+        ws = new WebSocket(`${relayUrl}/ws?room=${encodeURIComponent(targetId)}&role=guest`);
+        this.ws = ws;
+      } catch (err) {
+        failHandshake(err);
+        return;
+      }
+
+      handshakeTimer = setTimeout(() => {
+        failHandshake(new Error('Timeout connessione al relay WebSocket.'));
+      }, 4500);
+
+      ws.addEventListener('message', (ev) => {
+        if (ws.__msSuperseded || this._disposed) return;
+        let msg;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch (_) {
+          return;
+        }
+        if (!msg || typeof msg !== 'object') return;
+
+        if (msg.type === 'relay_welcome') {
+          if (!settled) {
+            settled = true;
+            clearHandshake();
+            this.connected = true;
+            this.roomId = msg.roomId || targetId;
+            this._startWsKeepalive(ws);
+            if (this.callbacks.onConnect) this.callbacks.onConnect(false, msg.peerId || 'guest');
+            resolve(this.roomId);
+          }
+          return;
+        }
+
+        if (msg.type === 'relay_error') {
+          const isLogical = msg.code === 'room_not_found' || msg.code === 'room_full';
+          const err = new Error(
+            msg.message || `Stanza "${targetId}" non trovata! Assicurati che l'Host abbia la stanza aperta.`
+          );
+          err.code = msg.code;
+          if (!settled) {
+            failHandshake(err, isLogical);
+          } else if (this.callbacks.onError) {
+            this.callbacks.onError(err);
+          }
+          return;
+        }
+
+        if (msg.type === 'relay_host_left') {
+          if (ws.__msCloseHandled) return;
+          ws.__msCloseHandled = true;
+          ws.__msSuperseded = true;
+          this._clearWsKeepalive();
+          this.connected = false;
+          if (this.ws === ws) this.ws = null;
+          try { ws.close(); } catch (_) {}
+          if (this.callbacks.onDisconnect) this.callbacks.onDisconnect();
+          return;
+        }
+
+        if (msg.t === 'd' && msg.d !== undefined) {
+          if (this.callbacks.onData) this.callbacks.onData(msg.d, msg.from || 'host');
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        if (ws.__msSuperseded) return;
+        if (!settled) {
+          failHandshake(new Error('Impossibile contattare il relay WebSocket.'));
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        if (ws.__msSuperseded || ws.__msCloseHandled) return;
+        ws.__msCloseHandled = true;
+        clearHandshake();
+        this._clearWsKeepalive();
+        if (!settled) {
+          failHandshake(new Error('Connessione relay chiusa prima del welcome.'));
+          return;
+        }
+        this.connected = false;
+        if (this.ws === ws) this.ws = null;
+        if (this.callbacks.onDisconnect) this.callbacks.onDisconnect();
+      });
+    });
+  }
+
+  async _joinViaPeerJs(targetId) {
+    if (!window.Peer) {
+      const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
       if (this.callbacks.onError) this.callbacks.onError(err);
       throw err;
     }
@@ -292,6 +739,7 @@ export class NetworkManager {
 
     return new Promise((resolve, reject) => {
       this.isHost = false;
+      this.transport = 'peerjs';
       this.roomId = targetId;
 
       try {
@@ -536,6 +984,16 @@ export class NetworkManager {
 
   // Invia dati a uno specifico peer (solo Host)
   sendTo(peerId, data, isVolatile = false) {
+    if (this.transport === 'ws-relay') {
+      if (!this.isHost || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (isVolatile && this.ws.bufferedAmount > 65536) return;
+      try {
+        this.ws.send(JSON.stringify({ t: 'd', to: peerId, d: data }));
+      } catch (e) {
+        console.warn('Invio relay unicast fallito:', e);
+      }
+      return;
+    }
     const target = this.conns.get(peerId);
     this._sendOverConn(target, data, isVolatile);
   }
@@ -554,6 +1012,21 @@ export class NetworkManager {
 
   // Invia dati: Host fa broadcast a tutti gli amici connessi; Client invia all'Host
   send(data, isVolatile = false) {
+    if (this.transport === 'ws-relay') {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (isVolatile && this.ws.bufferedAmount > 65536) return;
+      try {
+        if (this.isHost) {
+          if (this.relayPeers.size === 0) return;
+          this.ws.send(JSON.stringify({ t: 'b', d: data }));
+        } else {
+          this.ws.send(JSON.stringify({ t: 'd', d: data }));
+        }
+      } catch (e) {
+        console.warn('Invio relay fallito:', e);
+      }
+      return;
+    }
     if (this.isHost) {
       this.conns.forEach((conn) => this._sendOverConn(conn, data, isVolatile));
     } else {
@@ -563,7 +1036,9 @@ export class NetworkManager {
 
   // Disconnetti e pulisci
   disconnect() {
+    this._disposed = true;
     this._clearConnectTimeout();
+    this._closeActiveWs();
     this.conns.forEach((conn) => {
       conn.__msSuperseded = true;
       try { conn.close(); } catch (_) {}
@@ -580,5 +1055,6 @@ export class NetworkManager {
     }
     this.connected = false;
     this.isHost = false;
+    this.transport = 'peerjs';
   }
 }

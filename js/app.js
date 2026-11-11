@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.4';
-import { FootballGame } from './game.js?v=3.4';
-import { NetworkManager } from './network.js?v=3.4';
-import { sounds } from './audio.js?v=3.4';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.5';
+import { FootballGame } from './game.js?v=3.5';
+import { NetworkManager } from './network.js?v=3.5';
+import { sounds } from './audio.js?v=3.5';
 
 const MODE_HINTS = {
   '1v1': '<strong>Stanza 1v1 (2 giocatori):</strong> Ognuno comanda tutta la propria squadra (cambio giocatore con Q / Spazio).',
@@ -137,6 +137,39 @@ class App {
 
     const btnDraftCopyLink = document.getElementById('btn-draft-copy-link');
     if (btnDraftCopyLink) btnDraftCopyLink.onclick = () => this.copyRoomLink();
+
+    // Impostazioni opzionali Relay WebSocket (Cloudflare Workers)
+    const btnSaveRelay = document.getElementById('btn-save-relay');
+    if (btnSaveRelay) {
+      btnSaveRelay.onclick = async () => {
+        const raw = (document.getElementById('relay-url-input')?.value || '').trim();
+        if (!raw) {
+          this.showToast("Inserisci l'URL wss:// del tuo Cloudflare Worker Relay.");
+          return;
+        }
+        const saved = NetworkManager.saveRelayUrl(raw);
+        if (!saved) {
+          sounds.playBeep(260, 0.08);
+          this.showToast("⚠️ URL Relay non valido (usa es. wss://msoccer-relay.tuo-nome.workers.dev).");
+          return;
+        }
+        const relayInput = document.getElementById('relay-url-input');
+        if (relayInput) relayInput.value = saved;
+        this.refreshTurnStatusUI();
+        sounds.playBeep(820, 0.05);
+        this.showToast("✅ Relay WebSocket salvato! Funziona ora su tutti i Wi-Fi e 4G.");
+      };
+    }
+
+    const btnClearRelay = document.getElementById('btn-clear-relay');
+    if (btnClearRelay) {
+      btnClearRelay.onclick = () => {
+        NetworkManager.saveRelayUrl('');
+        this.loadTurnInputs();
+        sounds.playBeep(480, 0.05);
+        this.showToast("Relay WebSocket personalizzato rimosso.");
+      };
+    }
 
     // Impostazioni opzionali Relay TURN (4G / Reti restrittive)
     const btnSaveTurn = document.getElementById('btn-save-turn');
@@ -425,17 +458,32 @@ class App {
 
   checkUrlParams() {
     const params = new URLSearchParams(window.location.search);
+    const relayParam = params.get('relay');
+    if (relayParam) {
+      const normalizedRelay = NetworkManager.normalizeRelayUrl(relayParam);
+      if (normalizedRelay) {
+        this._inviteRelayUrl = normalizedRelay;
+      }
+    }
     const room = params.get('room');
     if (room) {
       this.gameMode = 'online';
       this.isHost = false;
       this.joinRoomInput.value = room.trim().toUpperCase();
       this.openOnlineModal();
-      this.showToast("Stanza rilevata dal link! Clicca 'Unisciti'");
+      this.showToast(
+        this._inviteRelayUrl
+          ? "Stanza e Relay rilevati dal link! Clicca 'Unisciti'"
+          : "Stanza rilevata dal link! Clicca 'Unisciti'"
+      );
     }
   }
 
   loadTurnInputs() {
+    const relayEl = document.getElementById('relay-url-input');
+    if (relayEl) {
+      relayEl.value = NetworkManager.getRelayUrl() || '';
+    }
     const cfg = NetworkManager.getTurnConfig();
     const urlEl = document.getElementById('turn-url-input');
     const userEl = document.getElementById('turn-user-input');
@@ -449,15 +497,21 @@ class App {
   refreshTurnStatusUI() {
     const summaryEl = document.getElementById('turn-summary-text');
     if (!summaryEl) return;
-    if (NetworkManager.hasTurnConfigured()) {
+    const hasRelay = NetworkManager.hasRelayConfigured();
+    const hasTurn = NetworkManager.hasTurnConfigured();
+    if (hasRelay && hasTurn) {
+      summaryEl.innerText = '🌐 Relay WebSocket + TURN attivi ✅ (Wi-Fi diversi / 4G)';
+    } else if (hasRelay) {
+      summaryEl.innerText = '🌐 Relay WebSocket attivo ✅ (funziona su qualsiasi Wi-Fi / 4G)';
+    } else if (hasTurn) {
       summaryEl.innerText = '⚙️ Relay TURN attivo ✅ (Wi-Fi diversi / 4G abilitato)';
     } else {
-      summaryEl.innerText = '⚙️ Su 4G o Wi-Fi diversi bloccati? Configura relay TURN (opzionale)';
+      summaryEl.innerText = '⚙️ Su 4G o Wi-Fi diversi bloccati? Configura Relay WebSocket o TURN (opzionale)';
     }
   }
 
   _openTurnSettingsIfUnconfigured() {
-    if (NetworkManager.hasTurnConfigured()) return;
+    if (NetworkManager.hasTurnConfigured() || NetworkManager.hasRelayConfigured()) return;
     const details = document.getElementById('turn-settings-details');
     if (details) details.open = true;
   }
@@ -530,9 +584,14 @@ class App {
   }
 
   assignDefaultSeats(preserveConnectedPeers = false) {
-    const existingPeers = (preserveConnectedPeers && this.gameMode === 'online' && this.isHost && this.net && this.net.conns)
-      ? Array.from(this.net.conns.keys())
-      : [];
+    let existingPeers = [];
+    if (preserveConnectedPeers && this.gameMode === 'online' && this.isHost && this.net) {
+      if (typeof this.net.getConnectedPeerIds === 'function') {
+        existingPeers = this.net.getConnectedPeerIds();
+      } else if (this.net.conns) {
+        existingPeers = Array.from(this.net.conns.keys());
+      }
+    }
 
     if (this.gameMode === 'cpu') {
       this.controlMode = '1v1';
@@ -715,7 +774,12 @@ class App {
 
     this.net = new NetworkManager({
       onHostReady: (roomId) => {
-        const fullUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+        const activeRelay = NetworkManager.getRelayUrl();
+        const defaultRelay = NetworkManager.getDefaultRelayUrl();
+        let fullUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+        if (this.net && this.net.transport === 'ws-relay' && activeRelay && activeRelay !== defaultRelay) {
+          fullUrl += `&relay=${encodeURIComponent(activeRelay)}`;
+        }
         this.hostRoomCodeEl.innerText = roomId;
         this.roomShareUrl.innerText = fullUrl;
         document.getElementById('host-waiting-box').style.display = 'block';
@@ -854,7 +918,7 @@ class App {
       }
     });
 
-    this.net.joinGame(raw).catch(() => {
+    this.net.joinGame(raw, { relayUrl: this._inviteRelayUrl || '' }).catch(() => {
       this.resetOnlineLobbyUI();
     });
   }
@@ -1404,7 +1468,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.4`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.5`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
