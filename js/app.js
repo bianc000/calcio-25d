@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.6';
-import { FootballGame } from './game.js?v=3.6';
-import { NetworkManager } from './network.js?v=3.6';
-import { sounds } from './audio.js?v=3.6';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.7';
+import { FootballGame } from './game.js?v=3.7';
+import { NetworkManager } from './network.js?v=3.7';
+import { sounds } from './audio.js?v=3.7';
 
 const MODE_HINTS = {
   '1v1': '<strong>Stanza 1v1 (2 giocatori):</strong> Ognuno comanda tutta la propria squadra (cambio giocatore con Q / Spazio).',
@@ -1395,13 +1395,14 @@ class App {
     this.draftScreen.classList.add('hidden');
     if (this.gameOverScreen) this.gameOverScreen.classList.add('hidden');
     if (this.pauseModal) this.pauseModal.classList.add('hidden');
-    if (this.goalBanner) this.goalBanner.classList.remove('active');
+    if (this.goalBanner) this.goalBanner.classList.remove('show', 'active');
+    if (this.matchClockEl) this.matchClockEl.classList.remove('sudden-death');
     this.inGameHud.style.display = 'flex';
 
     // Rimuovi canvas precedente se presente
     this.canvasContainer.innerHTML = '';
 
-    // Avvia Motore 2.5D con modalità di controllo (1v1 / 2v2 / 3v3) e seggi
+    // Avvia Motore 3D con modalità di controllo (1v1 / 2v2 / 3v3) e seggi
     this.game = new FootballGame(this.canvasContainer, {
       team1: this.team1Picked,
       team2: this.team2Picked,
@@ -1416,8 +1417,8 @@ class App {
       onTogglePause: () => this.togglePause(),
       onSpecialTrigger: (data) => this.showSpecialCutin(data.charData),
       onToast: (msg) => this.showToast(msg),
-      onGoal: (team, score, scorer, isSpecial) => this.handleGoal(team, score, scorer, isSpecial),
-      onMatchEnd: (score) => this.handleMatchEnd(score),
+      onGoal: (team, score, scorer, isSpecial, isGoldenGoal) => this.handleGoal(team, score, scorer, isSpecial, isGoldenGoal),
+      onMatchEnd: (score, info) => this.handleMatchEnd(score, info),
       onUpdateHUD: (hudData) => this.updateHUD(hudData),
       onClientAction: (actionPayload) => {
         if (this.net && this.net.connected) {
@@ -1468,7 +1469,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.6`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.7`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
@@ -1492,7 +1493,7 @@ class App {
     }, 1400);
   }
 
-  handleGoal(team, score, scorer, isSpecial) {
+  handleGoal(team, score, scorer, isSpecial, isGoldenGoal = false) {
     const scorerName = scorer ? scorer.name.toUpperCase() : (team === 1 ? 'ROSSI' : 'BLU');
     const teamLabel = (team === 1) ? 'SQUADRA 1 (ROSSI)' : 'SQUADRA 2 (BLU)';
 
@@ -1502,10 +1503,10 @@ class App {
     const specialTagEl = document.getElementById('goal-special-tag');
 
     if (scorerNameEl) scorerNameEl.innerText = `${scorerName}!`;
-    if (scorerTeamEl) scorerTeamEl.innerText = teamLabel;
+    if (scorerTeamEl) scorerTeamEl.innerText = isGoldenGoal ? `${teamLabel} · GOLDEN GOAL!` : teamLabel;
 
     if (scorerImgEl) {
-      const avatarUrl = (scorer && scorer.charData && scorer.charData.avatar) ? scorer.charData.avatar : (scorer && scorer.id === 'ara' ? 'assets/ara_avatar.png' : null);
+      const avatarUrl = (scorer && scorer.charData && scorer.charData.avatar) ? scorer.charData.avatar : (scorer && scorer.id === 'ara' ? 'assets/ara_avatar.png?v=3.7' : null);
       if (avatarUrl) {
         scorerImgEl.src = avatarUrl;
         scorerImgEl.style.display = 'block';
@@ -1515,7 +1516,13 @@ class App {
     }
 
     if (specialTagEl) {
-      if (isSpecial && scorer && scorer.charData && scorer.charData.special) {
+      if (isGoldenGoal) {
+        const extra = (isSpecial && scorer && scorer.charData && scorer.charData.special)
+          ? ` (${scorer.charData.special.toUpperCase()})`
+          : '';
+        specialTagEl.innerText = `⚡ GOLDEN GOAL! VITTORIA!${extra} ⚡`;
+        specialTagEl.style.display = 'inline-block';
+      } else if (isSpecial && scorer && scorer.charData && scorer.charData.special) {
         specialTagEl.innerText = `⚡ SPECIAL: ${scorer.charData.special.toUpperCase()} ⚡`;
         specialTagEl.style.display = 'inline-block';
       } else {
@@ -1523,26 +1530,34 @@ class App {
       }
     }
 
+    if (this._goalBannerTimer) clearTimeout(this._goalBannerTimer);
     this.goalBanner.classList.add('show');
-    setTimeout(() => {
+    this._goalBannerTimer = setTimeout(() => {
       this.goalBanner.classList.remove('show');
-    }, 3200);
+      this._goalBannerTimer = null;
+    }, isGoldenGoal ? 2100 : 3200);
   }
 
-  handleMatchEnd(score) {
+  handleMatchEnd(score, info = {}) {
+    if (this._goalBannerTimer) {
+      clearTimeout(this._goalBannerTimer);
+      this._goalBannerTimer = null;
+    }
+    if (this.goalBanner) this.goalBanner.classList.remove('show', 'active');
     this.gameOverScreen.classList.remove('hidden');
     const resultTitle = document.getElementById('game-over-title');
     const finalScoreEl = document.getElementById('final-score');
     finalScoreEl.innerText = `${score[0]} - ${score[1]}`;
 
+    const isGolden = !!(info && info.goldenGoal);
     if (score[0] > score[1]) {
-      resultTitle.innerText = "VITTORIA SQUADRA ROSSA!";
+      resultTitle.innerText = isGolden ? "⚡ GOLDEN GOAL! VITTORIA ROSSA!" : "VITTORIA SQUADRA ROSSA!";
       resultTitle.style.color = "#e74c3c";
     } else if (score[1] > score[0]) {
-      resultTitle.innerText = "VITTORIA SQUADRA BLU!";
+      resultTitle.innerText = isGolden ? "⚡ GOLDEN GOAL! VITTORIA BLU!" : "VITTORIA SQUADRA BLU!";
       resultTitle.style.color = "#2980b9";
     } else {
-      resultTitle.innerText = "PAREGGIO COMBATTUTO!";
+      resultTitle.innerText = (info && info.suddenDeath) ? "PAREGGIO ANCHE AL SUDDEN DEATH!" : "PAREGGIO COMBATTUTO!";
       resultTitle.style.color = "#ffd700";
     }
   }
@@ -1556,7 +1571,9 @@ class App {
       const t = Math.ceil(this.game.matchTime || 0);
       const mins = Math.floor(t / 60);
       const secs = (t % 60).toString().padStart(2, '0');
-      if (this.pauseClock) this.pauseClock.innerText = `${mins}:${secs}`;
+      if (this.pauseClock) {
+        this.pauseClock.innerText = this.game.isSuddenDeath ? `⚡ ${mins}:${secs}` : `${mins}:${secs}`;
+      }
       if (this.pauseModal) this.pauseModal.classList.remove('hidden');
     } else {
       sounds.playBeep(650, 0.06);
@@ -1586,7 +1603,9 @@ class App {
 
     const mins = Math.floor(hudData.matchTime / 60);
     const secs = (hudData.matchTime % 60).toString().padStart(2, '0');
-    this.matchClockEl.innerText = `${mins}:${secs}`;
+    const isSD = !!hudData.isSuddenDeath;
+    this.matchClockEl.innerText = isSD ? `⚡ ${mins}:${secs}` : `${mins}:${secs}`;
+    this.matchClockEl.classList.toggle('sudden-death', isSD);
 
     // Super Gauge HUD (segue la squadra effettiva dell'utente anche se co-op su Squadra 1)
     const myTeam = hudData.localTeam || this.localTeam || 1;

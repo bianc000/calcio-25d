@@ -682,6 +682,19 @@ h1, h2, h3 {
   letter-spacing: 1px;
 }
 
+.match-clock.sudden-death {
+  color: #fff3b0;
+  background: linear-gradient(135deg, #b83200, #ff6d00);
+  border-color: #ffd700;
+  box-shadow: 0 0 14px rgba(255, 145, 0, 0.85);
+  animation: pulseSuddenDeathClock 0.85s ease-in-out infinite alternate;
+}
+
+@keyframes pulseSuddenDeathClock {
+  from { transform: scale(1); }
+  to { transform: scale(1.07); }
+}
+
 .btn-pause-hud {
   background: #18283a;
   border: 1px solid #2e4a68;

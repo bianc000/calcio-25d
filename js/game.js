@@ -1,6 +1,6 @@
-// Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.4';
-import { sounds } from './audio.js?v=3.4';
+// Motore di Gioco 3D Calcio con Three.js
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.7';
+import { sounds } from './audio.js?v=3.7';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -17,8 +17,10 @@ export class FootballGame {
     // Stato partita
     this.score = [0, 0];
     this.matchTime = 180; // 3 minuti in secondi (180s)
+    this.isSuddenDeath = false;
     this.state = 'waiting'; // waiting, playing, goal, ended
     this.goalCelebrationTimer = 0;
+    this._faceTexCache = new Map();
     this.isSinglePlayer = options.isSinglePlayer !== false;
     this.isPaused = false;
     this.controlMode = options.controlMode || '1v1'; // '1v1', '2v2', '3v3'
@@ -79,10 +81,10 @@ export class FootballGame {
     this.scene.background = new window.THREE.Color(0x2f7dd4);
     this.scene.fog = new window.THREE.FogExp2(0x8bc2f4, 0.0028);
 
-    // Camera 2.5D ravvicinata: inquadra tutto il campetto e sullo sfondo gli edifici gialli, l'albero e la montagna
-    this.camera = new window.THREE.PerspectiveCamera(50, width / height, 0.1, 600);
-    this.camera.position.set(0, 36, 48.5);
-    this.camera.lookAt(0, 0.8, 0);
+    // Telecamera 3D dinamica: prospettiva tridimensionale sul campetto e sugli edifici sullo sfondo
+    this.camera = new window.THREE.PerspectiveCamera(47, width / height, 0.1, 600);
+    this.camera.position.set(0, 24.5, 45.5);
+    this.camera.lookAt(0, 1.4, 0);
 
     // Renderer
     this.renderer = new window.THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -987,116 +989,531 @@ export class FootballGame {
     return sprite;
   }
 
-  createPlayerMesh(charData, teamColor, isCaptain = false) {
+  _getFaceTexture(charData) {
+    const cacheKey = `${charData.id}|${charData.avatar || ''}`;
+    if (this._faceTexCache && this._faceTexCache.has(cacheKey)) {
+      return this._faceTexCache.get(cacheKey);
+    }
+
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const skinColor = charData.skinColor || '#d49a74';
+
+    const drawSkinBase = () => {
+      ctx.clearRect(0, 0, size, size);
+      ctx.fillStyle = skinColor;
+      ctx.fillRect(0, 0, size, size);
+    };
+
+    drawSkinBase();
+    ctx.fillStyle = '#1b1b1b';
+    ctx.beginPath();
+    ctx.arc(size * 0.36, size * 0.44, 10, 0, Math.PI * 2);
+    ctx.arc(size * 0.64, size * 0.44, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    const tex = new window.THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    if (this._faceTexCache) this._faceTexCache.set(cacheKey, tex);
+
+    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=3.7`;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      drawSkinBase();
+      const iw = img.naturalWidth || img.width || 1024;
+      const ih = img.naturalHeight || img.height || 1024;
+      // Ritaglio stretto sul volto (occhi, naso, bocca, guance) escludendo bordo e maglietta
+      const sx = iw * 0.29;
+      const sy = ih * 0.22;
+      const sw = iw * 0.42;
+      const sh = ih * 0.44;
+
+      const tmp = document.createElement('canvas');
+      tmp.width = size;
+      tmp.height = size;
+      const tctx = tmp.getContext('2d');
+      tctx.drawImage(img, sx, sy, sw, sh, size * 0.04, size * 0.04, size * 0.92, size * 0.92);
+
+      // Maschera alpha radiale morbida per sfumare i contorni nel colore pelle della testa 3D
+      tctx.globalCompositeOperation = 'destination-in';
+      const mask = tctx.createRadialGradient(size * 0.5, size * 0.48, size * 0.22, size * 0.5, size * 0.48, size * 0.45);
+      mask.addColorStop(0, 'rgba(255,255,255,1)');
+      mask.addColorStop(0.62, 'rgba(255,255,255,0.95)');
+      mask.addColorStop(0.85, 'rgba(255,255,255,0.35)');
+      mask.addColorStop(1, 'rgba(255,255,255,0)');
+      tctx.fillStyle = mask;
+      tctx.fillRect(0, 0, size, size);
+
+      ctx.drawImage(tmp, 0, 0);
+      tex.needsUpdate = true;
+    };
+    img.src = avatarPath;
+
+    return tex;
+  }
+
+  _buildHairGroup(charData, scale) {
+    const hairGroup = new window.THREE.Group();
+    const hairMat = new window.THREE.MeshStandardMaterial({
+      color: charData.hairColor || '#2a1a0e',
+      roughness: 0.78,
+      metalness: 0.04
+    });
+
+    // Calotta posteriore e laterale dei capelli (parte da +X passando dietro -Z fino a -X)
+    const backCap = new window.THREE.Mesh(
+      new window.THREE.SphereGeometry(0.508 * scale, 16, 12, Math.PI * 0.90, Math.PI * 1.20, 0, Math.PI * 0.62),
+      hairMat
+    );
+    backCap.scale.set(0.96, 1.06, 0.98);
+    hairGroup.add(backCap);
+
+    // Sommità superiore della testa
+    const crownCap = new window.THREE.Mesh(
+      new window.THREE.SphereGeometry(0.505 * scale, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.30),
+      hairMat
+    );
+    crownCap.scale.set(0.96, 1.06, 0.98);
+    hairGroup.add(crownCap);
+
+    if (charData.hairStyle === 'curly') {
+      const curls = [
+        [0, 0.46, 0.25, 0.14],
+        [-0.18, 0.44, 0.22, 0.13],
+        [0.18, 0.44, 0.22, 0.13],
+        [-0.31, 0.36, 0.12, 0.12],
+        [0.31, 0.36, 0.12, 0.12],
+        [0, 0.52, 0.02, 0.15],
+        [-0.16, 0.49, -0.10, 0.13],
+        [0.16, 0.49, -0.10, 0.13]
+      ];
+      curls.forEach(([cx, cy, cz, cr]) => {
+        const curl = new window.THREE.Mesh(new window.THREE.SphereGeometry(cr * scale, 8, 8), hairMat);
+        curl.position.set(cx * scale, cy * scale, cz * scale);
+        hairGroup.add(curl);
+      });
+    } else if (charData.hairStyle === 'spike') {
+      const spikes = [
+        [0, 0.56, 0.14, 0.28],
+        [-0.16, 0.53, 0.10, 0.18],
+        [0.16, 0.53, 0.10, 0.18],
+        [0, 0.54, -0.06, -0.12]
+      ];
+      spikes.forEach(([sx, sy, sz, tiltX]) => {
+        const spike = new window.THREE.Mesh(new window.THREE.ConeGeometry(0.11 * scale, 0.26 * scale, 6), hairMat);
+        spike.position.set(sx * scale, sy * scale, sz * scale);
+        spike.rotation.x = tiltX;
+        hairGroup.add(spike);
+      });
+    }
+
+    // Berretto all'indietro iconico per Lindi (come nel ritratto)
+    if (charData.id === 'lindi') {
+      const capMat = new window.THREE.MeshStandardMaterial({ color: 0xcfd5dd, roughness: 0.65, metalness: 0.05 });
+      const capCrown = new window.THREE.Mesh(
+        new window.THREE.SphereGeometry(0.518 * scale, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.42),
+        capMat
+      );
+      capCrown.scale.set(0.97, 1.04, 1.0);
+      capCrown.rotation.x = -0.04;
+      hairGroup.add(capCrown);
+
+      const visor = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.48 * scale, 0.055 * scale, 0.34 * scale), capMat);
+      visor.position.set(0, 0.25 * scale, -0.52 * scale);
+      visor.rotation.x = -0.12;
+      hairGroup.add(visor);
+    }
+
+    return hairGroup;
+  }
+
+  _updatePlayerRigAnimation(p, speed, dt, isCelebrating = false) {
+    if (!p || !p.rig) return;
+    const rig = p.rig;
+    const s = p.scale || 1.0;
+
+    if (p.kickAnim > 0) p.kickAnim = Math.max(0, p.kickAnim - dt);
+    if (p.diveTimer > 0) p.diveTimer = Math.max(0, p.diveTimer - dt);
+    if (p.aerialTimer > 0) p.aerialTimer = Math.max(0, p.aerialTimer - dt);
+
+    const nowSec = performance.now() * 0.001;
+
+    // 1. Celebrazione Gol (salto ed esultanza a braccia alzate)
+    if (isCelebrating) {
+      const jump = Math.abs(Math.sin(nowSec * 6.5 + (p.animPhase || 0)));
+      rig.bodyGroup.position.y = jump * 0.95 * s;
+      rig.bodyGroup.rotation.set(0, 0, 0);
+      rig.torsoPivot.rotation.set(-0.14 * jump, Math.sin(nowSec * 5 + (p.animPhase || 0)) * 0.22, 0);
+      rig.headGroup.rotation.set(-0.08, 0, 0);
+      rig.leftShoulderPivot.rotation.set(-2.55 + Math.sin(nowSec * 12) * 0.2, 0, -0.32);
+      rig.rightShoulderPivot.rotation.set(-2.55 - Math.sin(nowSec * 12) * 0.2, 0, 0.32);
+      rig.leftElbowPivot.rotation.set(-0.35, 0, 0);
+      rig.rightElbowPivot.rotation.set(-0.35, 0, 0);
+      rig.leftHipPivot.rotation.set(-0.22 * jump, 0, -0.05);
+      rig.rightHipPivot.rotation.set(0.22 * jump, 0, 0.05);
+      rig.leftKneePivot.rotation.set(0.45 * jump + 0.08, 0, 0);
+      rig.rightKneePivot.rotation.set(0.45 * jump + 0.08, 0, 0);
+      return;
+    }
+
+    // 2. Rovesciata / Tiro al volo acrobatico in aria
+    if (p.aerialTimer > 0) {
+      const tNorm = Math.min(1, p.aerialTimer / 0.48);
+      const arc = Math.sin(tNorm * Math.PI);
+      rig.bodyGroup.position.y = arc * 1.85 * s;
+      rig.bodyGroup.rotation.set(-arc * 1.45, 0, 0);
+      rig.torsoPivot.rotation.set(-0.15 * arc, 0, 0);
+      rig.headGroup.rotation.set(0.35 * arc, 0, 0);
+      rig.leftShoulderPivot.rotation.set(-0.4, 0, -1.05);
+      rig.rightShoulderPivot.rotation.set(-0.4, 0, 1.05);
+      rig.leftElbowPivot.rotation.set(-0.4, 0, 0);
+      rig.rightElbowPivot.rotation.set(-0.4, 0, 0);
+      rig.rightHipPivot.rotation.set(-1.55 * arc, 0, 0);
+      rig.rightKneePivot.rotation.set(0.22, 0, 0);
+      rig.leftHipPivot.rotation.set(0.35 * arc, 0, 0);
+      rig.leftKneePivot.rotation.set(0.95 * arc, 0, 0);
+      return;
+    }
+
+    // 3. Tuffo laterale del Portiere
+    if (p.diveTimer > 0) {
+      const tNorm = Math.sin(Math.min(1, p.diveTimer / 0.45) * Math.PI);
+      rig.bodyGroup.position.y = 0.45 * tNorm * s;
+      rig.bodyGroup.rotation.set(0, 0, (p.diveDir || 1) * 1.15 * tNorm);
+      rig.torsoPivot.rotation.set(0.05, 0, 0);
+      rig.headGroup.rotation.set(0, 0, -(p.diveDir || 1) * 0.35 * tNorm);
+      rig.leftShoulderPivot.rotation.set(-2.35 * tNorm, 0, -0.35);
+      rig.rightShoulderPivot.rotation.set(-2.35 * tNorm, 0, 0.35);
+      rig.leftElbowPivot.rotation.set(-0.2, 0, 0);
+      rig.rightElbowPivot.rotation.set(-0.2, 0, 0);
+      rig.leftHipPivot.rotation.set(0.15, 0, -0.1);
+      rig.rightHipPivot.rotation.set(-0.25, 0, 0.1);
+      rig.leftKneePivot.rotation.set(0.35, 0, 0);
+      rig.rightKneePivot.rotation.set(0.25, 0, 0);
+      return;
+    }
+
+    // 4. Scivolata difensiva (gambe in avanti verso la palla, busto all'indietro)
+    if (p.isSliding) {
+      rig.bodyGroup.position.y = 0.38 * s;
+      rig.bodyGroup.rotation.set(-1.12, 0, 0);
+      rig.torsoPivot.rotation.set(-0.1, 0, 0);
+      rig.headGroup.rotation.set(0.68, 0, 0);
+      rig.rightHipPivot.rotation.set(-0.45, 0, 0);
+      rig.rightKneePivot.rotation.set(0.12, 0, 0);
+      rig.leftHipPivot.rotation.set(0.25, 0, -0.18);
+      rig.leftKneePivot.rotation.set(1.15, 0, 0);
+      rig.leftShoulderPivot.rotation.set(0.55, 0, -0.55);
+      rig.rightShoulderPivot.rotation.set(-0.90, 0, 0.65);
+      rig.leftElbowPivot.rotation.set(-0.4, 0, 0);
+      rig.rightElbowPivot.rotation.set(-0.5, 0, 0);
+      return;
+    }
+
+    rig.bodyGroup.rotation.set(0, 0, 0);
+
+    // 5. Corsa atletica con braccia e gambe mobili vs Stance da fermo
+    if (speed > 0.45) {
+      const strideFreq = 3.2 + Math.min(speed, 17) * 0.72;
+      p.animPhase = (p.animPhase || 0) + dt * strideFreq;
+      const amp = Math.min(1.0, speed / 11.5);
+      const swing = Math.sin(p.animPhase);
+      const cosSwing = Math.cos(p.animPhase);
+
+      rig.bodyGroup.position.y = Math.abs(swing) * 0.14 * amp * s;
+      rig.torsoPivot.rotation.set(0.06 + 0.16 * amp, -swing * 0.12 * amp, 0);
+      rig.headGroup.rotation.set(-(0.04 + 0.08 * amp), swing * 0.05 * amp, 0);
+
+      // Gambe alternate + flessione naturale del ginocchio all'indietro (>= 0)
+      rig.leftHipPivot.rotation.set(-swing * 0.85 * amp, 0, -0.04);
+      rig.rightHipPivot.rotation.set(swing * 0.85 * amp, 0, 0.04);
+      rig.leftKneePivot.rotation.set(Math.max(0.08, (cosSwing * 0.65 + 0.35) * amp), 0, 0);
+      rig.rightKneePivot.rotation.set(Math.max(0.08, (-cosSwing * 0.65 + 0.35) * amp), 0, 0);
+
+      // Braccia in contro-fase naturale con gomiti flessi
+      rig.leftShoulderPivot.rotation.set(swing * 0.75 * amp, 0, -0.14);
+      rig.rightShoulderPivot.rotation.set(-swing * 0.75 * amp, 0, 0.14);
+      rig.leftElbowPivot.rotation.set(-0.45 - amp * (0.45 + Math.max(0, -swing) * 0.35), 0, 0);
+      rig.rightElbowPivot.rotation.set(-0.45 - amp * (0.45 + Math.max(0, swing) * 0.35), 0, 0);
+    } else {
+      const breath = Math.sin(nowSec * 2.8 + (p.animPhase || 0));
+      rig.bodyGroup.position.y = breath * 0.025 * s;
+      rig.torsoPivot.rotation.set(0.05 + breath * 0.02, 0, 0);
+      rig.headGroup.rotation.set(-0.02, Math.sin(nowSec * 1.1 + (p.animPhase || 0)) * 0.08, 0);
+      rig.leftHipPivot.rotation.set(-0.05, 0, -0.05);
+      rig.rightHipPivot.rotation.set(0.05, 0, 0.05);
+      rig.leftKneePivot.rotation.set(0.12, 0, 0);
+      rig.rightKneePivot.rotation.set(0.12, 0, 0);
+      rig.leftShoulderPivot.rotation.set(breath * 0.04, 0, -0.16);
+      rig.rightShoulderPivot.rotation.set(-breath * 0.04, 0, 0.16);
+      rig.leftElbowPivot.rotation.set(-0.32, 0, 0);
+      rig.rightElbowPivot.rotation.set(-0.32, 0, 0);
+    }
+
+    // 6. Slancio gamba e torsione busto durante tiro o passaggio
+    if (p.kickAnim > 0) {
+      const kt = Math.sin(Math.min(1, p.kickAnim / 0.28) * Math.PI);
+      rig.rightHipPivot.rotation.x = -1.25 * kt;
+      rig.rightKneePivot.rotation.x = 0.16 + (1 - kt) * 0.45;
+      rig.leftHipPivot.rotation.x = 0.22 * kt;
+      rig.leftKneePivot.rotation.x = 0.20;
+      rig.torsoPivot.rotation.y += 0.28 * kt;
+      rig.leftShoulderPivot.rotation.x = -0.70 * kt;
+      rig.rightShoulderPivot.rotation.x = 0.50 * kt;
+    }
+  }
+
+  createPlayerMesh(charData, teamColor, isCaptain = false, role = 'att') {
     const root = new window.THREE.Group();
     const scale = charData.height || 1.0;
+    const isGK = (role === 'gk');
 
-    // 1. Torso Corazzato stile Mario Strikers (Ruby Red vs Electric Blue)
-    const torsoGeo = new window.THREE.CylinderGeometry(0.64 * scale, 0.48 * scale, 1.15 * scale, 16);
-    const torsoMat = new window.THREE.MeshStandardMaterial({
-      color: teamColor,
-      roughness: 0.35,
-      metalness: 0.25
-    });
-    const torso = new window.THREE.Mesh(torsoGeo, torsoMat);
-    torso.position.y = 1.08 * scale;
+    const bodyGroup = new window.THREE.Group();
+    root.add(bodyGroup);
+
+    const skinColor = charData.skinColor || '#d49a74';
+    const skinMat = new window.THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.65, metalness: 0.02 });
+    const jerseyMat = new window.THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.42, metalness: 0.14 });
+    const trimColor = (teamColor === 0xe74c3c) ? 0xffd166 : 0x7df9ff;
+    const trimMat = new window.THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.35, metalness: 0.25 });
+    const shortsMat = new window.THREE.MeshStandardMaterial({ color: 0x111625, roughness: 0.55 });
+    const sockMat = new window.THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.5 });
+    const sockCuffMat = new window.THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45 });
+    const bootMat = new window.THREE.MeshStandardMaterial({ color: 0x050810, roughness: 0.3, metalness: 0.4 });
+    const gloveMat = new window.THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35, metalness: 0.1 });
+
+    // 1. Bacino e pantaloncini
+    const pelvis = new window.THREE.Mesh(
+      new window.THREE.CylinderGeometry(0.41 * scale, 0.43 * scale, 0.34 * scale, 14),
+      shortsMat
+    );
+    pelvis.scale.set(1.06, 1, 0.78);
+    pelvis.position.y = 1.36 * scale;
+    pelvis.castShadow = true;
+    bodyGroup.add(pelvis);
+
+    // 2. Gambe articolate (anca + coscia + ginocchio + polpaccio/calzettone + scarpino)
+    const buildLeg = (hipX) => {
+      const hipPivot = new window.THREE.Group();
+      hipPivot.position.set(hipX, 1.30 * scale, 0);
+      bodyGroup.add(hipPivot);
+
+      const shortsLeg = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.205 * scale, 0.175 * scale, 0.42 * scale, 10),
+        shortsMat
+      );
+      shortsLeg.position.y = -0.21 * scale;
+      shortsLeg.castShadow = true;
+      hipPivot.add(shortsLeg);
+
+      const thigh = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.155 * scale, 0.132 * scale, 0.34 * scale, 10),
+        skinMat
+      );
+      thigh.position.y = -0.47 * scale;
+      thigh.castShadow = true;
+      hipPivot.add(thigh);
+
+      const kneePivot = new window.THREE.Group();
+      kneePivot.position.set(0, -0.66 * scale, 0);
+      hipPivot.add(kneePivot);
+
+      const kneeCap = new window.THREE.Mesh(new window.THREE.SphereGeometry(0.132 * scale, 8, 8), skinMat);
+      kneePivot.add(kneeCap);
+
+      const sock = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.134 * scale, 0.11 * scale, 0.48 * scale, 10),
+        sockMat
+      );
+      sock.position.y = -0.25 * scale;
+      sock.castShadow = true;
+      kneePivot.add(sock);
+
+      const cuff = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.138 * scale, 0.138 * scale, 0.08 * scale, 10),
+        sockCuffMat
+      );
+      cuff.position.y = -0.06 * scale;
+      kneePivot.add(cuff);
+
+      const boot = new window.THREE.Mesh(
+        new window.THREE.BoxGeometry(0.24 * scale, 0.16 * scale, 0.44 * scale),
+        bootMat
+      );
+      boot.position.set(0, -0.56 * scale, 0.08 * scale);
+      boot.castShadow = true;
+      kneePivot.add(boot);
+
+      return { hipPivot, kneePivot };
+    };
+
+    // Guardando verso +Z: +X è sinistra anatomica, -X è destra anatomica
+    const leftLeg = buildLeg(0.22 * scale);
+    const rightLeg = buildLeg(-0.22 * scale);
+
+    // 3. Busto atletico articolato + Spalle/Braccia + Collo + Testa 3D
+    const torsoPivot = new window.THREE.Group();
+    torsoPivot.position.set(0, 1.48 * scale, 0);
+    bodyGroup.add(torsoPivot);
+
+    const torso = new window.THREE.Mesh(
+      new window.THREE.CylinderGeometry(0.49 * scale, 0.39 * scale, 1.04 * scale, 16),
+      jerseyMat
+    );
+    torso.scale.set(1.06, 1, 0.72);
+    torso.position.y = 0.52 * scale;
     torso.castShadow = true;
-    root.add(torso);
+    torsoPivot.add(torso);
 
-    // Spallacci corazzati stile Mario Strikers (Spalle larghe, atletiche e protette)
-    const shoulderMat = new window.THREE.MeshStandardMaterial({
-      color: (isCaptain || charData.id === 'jona' || charData.id === 'bubi') ? 0xffdd00 : teamColor,
-      roughness: 0.2,
-      metalness: 0.6
-    });
-    const leftPad = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.38 * scale, 0.24 * scale, 0.46 * scale), shoulderMat);
-    leftPad.position.set(-0.62 * scale, 1.45 * scale, 0);
-    leftPad.rotation.z = 0.25;
-    root.add(leftPad);
+    const collar = new window.THREE.Mesh(
+      new window.THREE.CylinderGeometry(0.22 * scale, 0.24 * scale, 0.09 * scale, 12),
+      trimMat
+    );
+    collar.position.y = 1.03 * scale;
+    torsoPivot.add(collar);
 
-    const rightPad = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.38 * scale, 0.24 * scale, 0.46 * scale), shoulderMat);
-    rightPad.position.set(0.62 * scale, 1.45 * scale, 0);
-    rightPad.rotation.z = -0.25;
-    root.add(rightPad);
+    const chestStripe = new window.THREE.Mesh(
+      new window.THREE.BoxGeometry(0.15 * scale, 0.88 * scale, 0.05 * scale),
+      trimMat
+    );
+    chestStripe.position.set(0, 0.52 * scale, 0.34 * scale);
+    torsoPivot.add(chestStripe);
 
-    // Dettaglio personalizzato: Mantello per Leon, Cartellino per Ento
+    // Dettagli personalizzati: Mantello per Leon, Cartellino Rosso per Ento
     if (charData.id === 'leon') {
-      const capeGeo = new window.THREE.PlaneGeometry(0.85 * scale, 1.1 * scale);
-      const capeMat = new window.THREE.MeshStandardMaterial({ color: 0x111118, side: window.THREE.DoubleSide });
+      const capeGeo = new window.THREE.PlaneGeometry(0.84 * scale, 1.12 * scale);
+      const capeMat = new window.THREE.MeshStandardMaterial({ color: 0x111118, side: window.THREE.DoubleSide, roughness: 0.7 });
       const cape = new window.THREE.Mesh(capeGeo, capeMat);
-      cape.position.set(0, 0.95 * scale, -0.42 * scale);
-      cape.rotation.x = 0.2;
-      root.add(cape);
+      cape.position.set(0, 0.48 * scale, -0.37 * scale);
+      cape.rotation.x = 0.22;
+      torsoPivot.add(cape);
     } else if (charData.id === 'ento') {
       const cardGeo = new window.THREE.PlaneGeometry(0.22 * scale, 0.32 * scale);
       const cardMat = new window.THREE.MeshBasicMaterial({ color: 0xff0033 });
       const card = new window.THREE.Mesh(cardGeo, cardMat);
-      card.position.set(0.18 * scale, 1.25 * scale, 0.52 * scale);
-      root.add(card);
+      card.position.set(-0.20 * scale, 0.68 * scale, 0.36 * scale);
+      torsoPivot.add(card);
     }
 
-    // Pantaloncini atletici
-    const shortsGeo = new window.THREE.CylinderGeometry(0.50 * scale, 0.44 * scale, 0.42 * scale, 16);
-    const shortsMat = new window.THREE.MeshStandardMaterial({ color: 0x111625, roughness: 0.5 });
-    const shorts = new window.THREE.Mesh(shortsGeo, shortsMat);
-    shorts.position.y = 0.58 * scale;
-    shorts.castShadow = true;
-    root.add(shorts);
-
-    // Gambe & Scarpini con tacchetti (Mario Strikers Cleats)
-    const bootMat = new window.THREE.MeshStandardMaterial({ color: 0x050810, roughness: 0.3, metalness: 0.4 });
-    const sockMat = new window.THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.5 });
-
-    [-0.24 * scale, 0.24 * scale].forEach(legX => {
-      const sock = new window.THREE.Mesh(new window.THREE.CylinderGeometry(0.14 * scale, 0.12 * scale, 0.42 * scale, 10), sockMat);
-      sock.position.set(legX, 0.28 * scale, 0);
-      root.add(sock);
-
-      const boot = new window.THREE.Mesh(new window.THREE.BoxGeometry(0.24 * scale, 0.16 * scale, 0.42 * scale), bootMat);
-      boot.position.set(legX, 0.08 * scale, 0.08 * scale);
-      root.add(boot);
-    });
-
-    // Supporto atletico del collo
-    const neckGeo = new window.THREE.CylinderGeometry(0.24 * scale, 0.28 * scale, 0.35 * scale, 12);
-    const neckMat = new window.THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.6 });
-    const neck = new window.THREE.Mesh(neckGeo, neckMat);
-    neck.position.y = 1.65 * scale;
-    root.add(neck);
-
-    // 2. VERO VOLTO FOTOGRAFICO IN-GAME (Stile Mario Strikers / Bobblehead)
-    // Mostra la reale foto dell'amico sempre rivolta alla telecamera con grandissima definizione
-    const loader = new window.THREE.TextureLoader();
-    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=3.4`;
-    const faceTex = loader.load(avatarPath);
-    const faceMat = new window.THREE.SpriteMaterial({
-      map: faceTex,
-      transparent: true,
-      depthTest: false // Sempre in primo piano e visibile al 100%
-    });
-    const faceSprite = new window.THREE.Sprite(faceMat);
-    faceSprite.position.set(0, 2.38 * scale, 0);
-    faceSprite.scale.set(2.45 * scale, 2.45 * scale, 1);
-    faceSprite.renderOrder = 950;
-    root.add(faceSprite);
-
-    // Fascia Capitano (Jona) o Vice Capitano (Bubi) al braccio
     const isCap = isCaptain || charData.id === 'jona';
     const isViceCap = charData.id === 'bubi';
-    if (isCap || isViceCap) {
-      const armBandGeo = new window.THREE.CylinderGeometry(0.16 * scale, 0.16 * scale, 0.14 * scale, 12);
-      const armBandMat = new window.THREE.MeshBasicMaterial({ color: isCap ? 0xffdd00 : 0x00e5ff });
-      const armBand = new window.THREE.Mesh(armBandGeo, armBandMat);
-      armBand.position.set(-0.70 * scale, 1.25 * scale, 0);
-      root.add(armBand);
-    }
+    const shoulderMat = new window.THREE.MeshStandardMaterial({
+      color: (isCap || isViceCap) ? 0xffdd00 : teamColor,
+      roughness: 0.25,
+      metalness: 0.45
+    });
+
+    const buildArm = (shoulderX, withArmband) => {
+      const shoulderPivot = new window.THREE.Group();
+      shoulderPivot.position.set(shoulderX, 0.94 * scale, 0);
+      torsoPivot.add(shoulderPivot);
+
+      const deltoid = new window.THREE.Mesh(new window.THREE.SphereGeometry(0.185 * scale, 10, 8), shoulderMat);
+      deltoid.castShadow = true;
+      shoulderPivot.add(deltoid);
+
+      const sleeve = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.165 * scale, 0.145 * scale, 0.32 * scale, 10),
+        jerseyMat
+      );
+      sleeve.position.y = -0.15 * scale;
+      sleeve.castShadow = true;
+      shoulderPivot.add(sleeve);
+
+      const upperArm = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.12 * scale, 0.105 * scale, 0.26 * scale, 10),
+        skinMat
+      );
+      upperArm.position.y = -0.35 * scale;
+      upperArm.castShadow = true;
+      shoulderPivot.add(upperArm);
+
+      if (withArmband) {
+        const armBand = new window.THREE.Mesh(
+          new window.THREE.CylinderGeometry(0.155 * scale, 0.155 * scale, 0.12 * scale, 12),
+          new window.THREE.MeshBasicMaterial({ color: isCap ? 0xffdd00 : 0x00e5ff })
+        );
+        armBand.position.y = -0.25 * scale;
+        shoulderPivot.add(armBand);
+      }
+
+      const elbowPivot = new window.THREE.Group();
+      elbowPivot.position.set(0, -0.48 * scale, 0);
+      shoulderPivot.add(elbowPivot);
+
+      const elbowBall = new window.THREE.Mesh(new window.THREE.SphereGeometry(0.102 * scale, 8, 8), isGK ? jerseyMat : skinMat);
+      elbowPivot.add(elbowBall);
+
+      const forearm = new window.THREE.Mesh(
+        new window.THREE.CylinderGeometry(0.105 * scale, 0.088 * scale, 0.42 * scale, 10),
+        isGK ? jerseyMat : skinMat
+      );
+      forearm.position.y = -0.21 * scale;
+      forearm.castShadow = true;
+      elbowPivot.add(forearm);
+
+      const hand = isGK
+        ? new window.THREE.Mesh(new window.THREE.BoxGeometry(0.15 * scale, 0.17 * scale, 0.13 * scale), gloveMat)
+        : new window.THREE.Mesh(new window.THREE.SphereGeometry(0.122 * scale, 8, 8), skinMat);
+      hand.position.y = -0.45 * scale;
+      hand.castShadow = true;
+      elbowPivot.add(hand);
+
+      return { shoulderPivot, elbowPivot };
+    };
+
+    const leftArm = buildArm(0.58 * scale, isCap || isViceCap);
+    const rightArm = buildArm(-0.58 * scale, false);
+
+    // Collo e Testa 3D proporzionata con ritratto fotografico integrato sul fronte
+    const neck = new window.THREE.Mesh(
+      new window.THREE.CylinderGeometry(0.165 * scale, 0.205 * scale, 0.28 * scale, 10),
+      skinMat
+    );
+    neck.position.y = 1.12 * scale;
+    torsoPivot.add(neck);
+
+    const headGroup = new window.THREE.Group();
+    headGroup.position.set(0, 1.48 * scale, 0);
+    torsoPivot.add(headGroup);
+
+    const cranium = new window.THREE.Mesh(new window.THREE.SphereGeometry(0.49 * scale, 20, 16), skinMat);
+    cranium.scale.set(0.96, 1.06, 0.98);
+    cranium.castShadow = true;
+    headGroup.add(cranium);
+
+    [-0.46 * scale, 0.46 * scale].forEach(earX => {
+      const ear = new window.THREE.Mesh(new window.THREE.SphereGeometry(0.105 * scale, 8, 8), skinMat);
+      ear.position.set(earX, -0.02 * scale, -0.02 * scale);
+      headGroup.add(ear);
+    });
+
+    const faceTex = this._getFaceTexture(charData);
+    const facePatch = new window.THREE.Mesh(
+      new window.THREE.SphereGeometry(0.496 * scale, 20, 16, Math.PI / 2 - 0.88, 1.76, Math.PI * 0.22, Math.PI * 0.56),
+      new window.THREE.MeshStandardMaterial({
+        map: faceTex,
+        roughness: 0.65,
+        metalness: 0.02,
+        polygonOffset: true,
+        polygonOffsetFactor: -1
+      })
+    );
+    facePatch.scale.set(0.96, 1.06, 0.98);
+    headGroup.add(facePatch);
+
+    headGroup.add(this._buildHairGroup(charData, scale));
 
     // 4. Ombra a terra del giocatore
     const shadowGeo = new window.THREE.CircleGeometry(0.85 * scale, 16);
     const shadowMat = new window.THREE.MeshBasicMaterial({ color: 0x051206, transparent: true, opacity: 0.5 });
     const shadow = new window.THREE.Mesh(shadowGeo, shadowMat);
     shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = 0.01;
+    shadow.position.y = 0.012;
     root.add(shadow);
 
     // 5. Anello di selezione luminoso sotto i piedi
@@ -1109,7 +1526,7 @@ export class FootballGame {
     });
     const ring = new window.THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.02;
+    ring.position.y = 0.025;
     root.add(ring);
 
     // 6. Freccia direzionale
@@ -1120,13 +1537,27 @@ export class FootballGame {
     arrow.position.set(0, 0.05, 1.6 * scale);
     root.add(arrow);
 
-    // 7. Cartellino nome giocatore in 3D fluttuante sopra la testa (proporzionato, nitido ed elegante)
+    // 7. Cartellino nome giocatore in 3D sopra la testa
     const nameTag = this.createNameTag(charData, teamColor, charData.id === 'ara');
-    nameTag.position.set(0, 3.85 * scale, 0);
+    nameTag.position.set(0, 4.05 * scale, 0);
     nameTag.scale.set(3.2 * scale, 0.8 * scale, 1);
     root.add(nameTag);
 
-    return { root, ring, ringMat, arrow, arrowMat, nameTag, scale };
+    const rig = {
+      bodyGroup,
+      torsoPivot,
+      headGroup,
+      leftShoulderPivot: leftArm.shoulderPivot,
+      leftElbowPivot: leftArm.elbowPivot,
+      rightShoulderPivot: rightArm.shoulderPivot,
+      rightElbowPivot: rightArm.elbowPivot,
+      leftHipPivot: leftLeg.hipPivot,
+      leftKneePivot: leftLeg.kneePivot,
+      rightHipPivot: rightLeg.hipPivot,
+      rightKneePivot: rightLeg.kneePivot
+    };
+
+    return { root, ring, ringMat, arrow, arrowMat, nameTag, rig, scale };
   }
 
   spawnPlayers() {
@@ -1153,15 +1584,17 @@ export class FootballGame {
     // Crea Squadra 1
     this.team1Ids.forEach((id, idx) => {
       const charData = getCharacterById(id);
-      const meshData = this.createPlayerMesh(charData, colorTeam1, idx === 0);
+      const role = posTeam1[idx].role;
+      const meshData = this.createPlayerMesh(charData, colorTeam1, idx === 0, role);
       const p = {
         id,
         name: charData.name,
         charData,
         team: 1,
         index: idx,
-        role: posTeam1[idx].role,
+        role,
         mesh: meshData.root,
+        rig: meshData.rig,
         nameTag: meshData.nameTag,
         ringMat: meshData.ringMat,
         arrowMat: meshData.arrowMat,
@@ -1173,10 +1606,14 @@ export class FootballGame {
         baseX: posTeam1[idx].x,
         baseZ: posTeam1[idx].z,
         scale: meshData.scale,
+        animPhase: idx * 1.7,
         isSliding: false,
         slideTimer: 0,
         stamina: 100,
         kickAnim: 0,
+        diveTimer: 0,
+        diveDir: 0,
+        aerialTimer: 0,
         protectionTimer: 0,
         tackleCooldown: 0,
         possessionTime: 0,
@@ -1192,15 +1629,17 @@ export class FootballGame {
     // Crea Squadra 2
     this.team2Ids.forEach((id, idx) => {
       const charData = getCharacterById(id);
-      const meshData = this.createPlayerMesh(charData, colorTeam2, idx === 0);
+      const role = posTeam2[idx].role;
+      const meshData = this.createPlayerMesh(charData, colorTeam2, idx === 0, role);
       const p = {
         id,
         name: charData.name,
         charData,
         team: 2,
         index: idx,
-        role: posTeam2[idx].role,
+        role,
         mesh: meshData.root,
+        rig: meshData.rig,
         nameTag: meshData.nameTag,
         ringMat: meshData.ringMat,
         arrowMat: meshData.arrowMat,
@@ -1212,10 +1651,14 @@ export class FootballGame {
         baseX: posTeam2[idx].x,
         baseZ: posTeam2[idx].z,
         scale: meshData.scale,
+        animPhase: (idx + 3) * 1.7,
         isSliding: false,
         slideTimer: 0,
         stamina: 100,
         kickAnim: 0,
+        diveTimer: 0,
+        diveDir: 0,
+        aerialTimer: 0,
         protectionTimer: 0,
         tackleCooldown: 0,
         possessionTime: 0,
@@ -1651,27 +2094,26 @@ export class FootballGame {
     this.ball.specialShooter = null;
 
     // Rimetti i giocatori nelle rispettive metà campo
-    this.playersTeam1.forEach(p => {
+    const resetPlayerPose = (p) => {
       p.x = p.baseX;
       p.z = p.baseZ;
       p.vx = 0;
       p.vz = 0;
       p.isSliding = false;
+      p.slideTimer = 0;
+      p.kickAnim = 0;
+      p.diveTimer = 0;
+      p.diveDir = 0;
+      p.aerialTimer = 0;
       p.isExpelled = false;
       p.expelledTimer = 0;
       p.mesh.position.set(p.x, 0, p.z);
-    });
-
-    this.playersTeam2.forEach(p => {
-      p.x = p.baseX;
-      p.z = p.baseZ;
-      p.vx = 0;
-      p.vz = 0;
-      p.isSliding = false;
-      p.isExpelled = false;
-      p.expelledTimer = 0;
-      p.mesh.position.set(p.x, 0, p.z);
-    });
+      p.mesh.rotation.x = 0;
+      p.mesh.rotation.z = 0;
+      this._updatePlayerRigAnimation(p, 0, 0, false);
+    };
+    this.playersTeam1.forEach(resetPlayerPose);
+    this.playersTeam2.forEach(resetPlayerPose);
 
     // Chi batte riceve la palla vicino e viene selezionato come giocatore attivo (in 1v1)
     if (concedingTeam === 1) {
@@ -1853,16 +2295,26 @@ export class FootballGame {
         const att = (data.scoringTeam === 1) ? this.playersTeam1 : this.playersTeam2;
         const scorer = att.find(p => p.charData && p.charData.id === data.scorerId) || att[0];
         if (this.options.onGoal) {
-          this.options.onGoal(data.scoringTeam, this.score, scorer, !!data.isSpecialGoal);
+          this.options.onGoal(data.scoringTeam, this.score, scorer, !!data.isSpecialGoal, !!data.goldenGoal);
         }
         break;
       }
+      case 'sudden_death':
+        this.isSuddenDeath = true;
+        this.matchTime = data.duration || 30;
+        this.score = data.score || this.score;
+        this.state = 'playing';
+        sounds.playWhistle(false);
+        if (this.options.onToast) {
+          this.options.onToast('⚡ PAREGGIO! SUDDEN DEATH 30s — CHI SEGNA VINCE!');
+        }
+        break;
       case 'match_end':
         this.score = data.score || this.score;
         this.state = 'ended';
         sounds.playWhistle(true);
         if (this.options.onMatchEnd) {
-          this.options.onMatchEnd(this.score);
+          this.options.onMatchEnd(this.score, { goldenGoal: !!data.goldenGoal, suddenDeath: this.isSuddenDeath });
         }
         break;
     }
@@ -1909,7 +2361,10 @@ export class FootballGame {
       p.vz *= 0.94;
       p.x += p.vx * dt;
       p.z += p.vz * dt;
-      p.mesh.rotation.x = Math.PI / 3; // inclinato a terra
+      p.x = Math.max(-this.FIELD_W / 2 - 1, Math.min(this.FIELD_W / 2 + 1, p.x));
+      p.z = Math.max(-this.FIELD_H / 2 - 1, Math.min(this.FIELD_H / 2 + 1, p.z));
+      p.mesh.position.set(p.x, 0, p.z);
+      p.mesh.rotation.y = p.rot;
 
       // Controlla se colpisce la palla o l'avversario durante la scivolata
       const distBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
@@ -1936,8 +2391,8 @@ export class FootballGame {
 
       if (p.slideTimer <= 0) {
         p.isSliding = false;
-        p.mesh.rotation.x = 0;
       }
+      this._updatePlayerRigAnimation(p, Math.hypot(p.vx, p.vz), dt, false);
       return;
     }
 
@@ -1949,6 +2404,8 @@ export class FootballGame {
         this.addCameraShake(0.5);
         p.isSliding = true;
         p.slideTimer = 0.42;
+        p.diveDir = Math.sign((this.ball.z - p.z) || 1);
+        p.diveTimer = 0.42;
         const dx = this.ball.x - p.x;
         const dz = this.ball.z - p.z;
         const d = Math.hypot(dx, dz) || 1;
@@ -1966,6 +2423,7 @@ export class FootballGame {
           this.ball.isSpecialShot = false;
           p.cannotPickupTimer = 0.3;
         }
+        this._updatePlayerRigAnimation(p, diveSpeed, dt, false);
         inputData.slideTrigger = false;
         return;
       }
@@ -1999,6 +2457,8 @@ export class FootballGame {
 
         p.cannotPickupTimer = 0.18;
         p.tackleCooldown = 0.7;
+        p.kickAnim = 0.24;
+        this._updatePlayerRigAnimation(p, Math.hypot(p.vx, p.vz), dt, false);
         inputData.slideTrigger = false;
         return;
       }
@@ -2009,6 +2469,7 @@ export class FootballGame {
       const slideSpeed = currentMaxSpeed * 1.4;
       p.vx = Math.sin(p.rot) * slideSpeed;
       p.vz = Math.cos(p.rot) * slideSpeed;
+      this._updatePlayerRigAnimation(p, slideSpeed, dt, false);
       sounds.playSlide();
       return;
     }
@@ -2038,17 +2499,11 @@ export class FootballGame {
     p.x = Math.max(-maxX, Math.min(maxX, p.x));
     p.z = Math.max(-maxZ, Math.min(maxZ, p.z));
 
-    // Animazione bobbing corsa
+    // Animazione 3D articolata (braccia, gambe, busto e calcetti)
     const currentSpeed = Math.hypot(p.vx, p.vz);
-    if (currentSpeed > 0.5) {
-      p.mesh.position.y = Math.sin(performance.now() * 0.015) * 0.12 * p.scale;
-    } else {
-      p.mesh.position.y = 0;
-    }
-
-    p.mesh.position.x = p.x;
-    p.mesh.position.z = p.z;
+    p.mesh.position.set(p.x, 0, p.z);
     p.mesh.rotation.y = p.rot;
+    this._updatePlayerRigAnimation(p, currentSpeed, dt, false);
 
     // Contrasto e Ruba Palla in piedi: se questo giocatore è vicino al portatore avversario
     if (this.ball.holder && this.ball.holder.team !== p.team && !p.isSliding) {
@@ -2172,6 +2627,7 @@ export class FootballGame {
           sounds.playKick(shotPowerNorm);
         }
 
+        p.kickAnim = 0.28;
         inputData.shootTrigger = false;
         inputData.shotBufferTimer = 0;
         inputData.shotPower = 0;
@@ -2240,6 +2696,7 @@ export class FootballGame {
         this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
         this.ballShadow.position.set(this.ball.x, 0.02, this.ball.z);
 
+        p.kickAnim = 0.24;
         inputData.passTrigger = false;
         inputData.passBufferTimer = 0;
 
@@ -2278,8 +2735,8 @@ export class FootballGame {
           this.ball.vy = 1.4; // Siluro teso
           this.ball.spinZ = (Math.random() - 0.5) * 8.0;
 
-          p.mesh.position.y = 1.25 * p.scale;
-          p.mesh.rotation.x = -Math.PI / 2.6; // Inclinazione acrobatica
+          p.aerialTimer = 0.48;
+          p.kickAnim = 0.28;
           sounds.playVolley();
           this.addCameraShake(1.15);
         } else {
@@ -2288,6 +2745,7 @@ export class FootballGame {
           this.ball.vx = forwardX * groundSpeed;
           this.ball.vz = forwardZ * groundSpeed;
           this.ball.vy = 2.4 + shotPowerNorm * 3.6;
+          p.kickAnim = 0.28;
           sounds.playKick(shotPowerNorm);
           this.addCameraShake(0.5);
         }
@@ -2464,7 +2922,8 @@ export class FootballGame {
                 // Impatto tremendo della Super: il portiere viene sbalzato all'indietro
                 sounds.playGloveSave();
                 this.addCameraShake(0.85);
-                p.mesh.rotation.z = Math.sign(this.ball.vz || 1) * 0.8;
+                p.diveDir = Math.sign(this.ball.vz || 1);
+                p.diveTimer = 0.45;
                 p.vx = Math.sign(ownGoalX) * 9;
                 p.isSliding = true;
                 p.slideTimer = 0.5;
@@ -2478,7 +2937,8 @@ export class FootballGame {
                 // Deviazione spettacolare in tuffo a guanto aperto!
                 sounds.playGloveSave();
                 this.addCameraShake(0.65);
-                p.mesh.rotation.z = Math.sign(this.ball.vz || 1) * 0.85;
+                p.diveDir = Math.sign(this.ball.vz || 1);
+                p.diveTimer = 0.45;
                 p.cannotPickupTimer = 0.45;
 
                 this.ball.vx = -this.ball.vx * 0.55;
@@ -2828,8 +3288,8 @@ export class FootballGame {
         const dist = Math.hypot(dx, dz) || 1;
 
         // Balzo e rovesciata acrobatica in aria
-        player.mesh.position.y = 2.4 * player.scale;
-        player.mesh.rotation.x = -Math.PI * 1.5;
+        player.aerialTimer = 0.55;
+        player.kickAnim = 0.30;
 
         this.ball.x = player.x + (dx / dist) * 1.5;
         this.ball.z = player.z + (dz / dist) * 1.5;
@@ -3183,7 +3643,7 @@ export class FootballGame {
   onGoalScored(scoringTeam) {
     this.state = 'goal';
     this.score[scoringTeam - 1]++;
-    this.goalCelebrationTimer = 3.5; // 3.5 secondi di celebrazione
+    this.goalCelebrationTimer = this.isSuddenDeath ? 2.2 : 3.5; // 2.2s Golden Goal o 3.5s standard
     this.lastScoringTeam = scoringTeam;
 
     sounds.playGoalCheer();
@@ -3196,26 +3656,27 @@ export class FootballGame {
       scorer = attackingPlayers[0];
     }
     const isSpecialGoal = this.ball.isSpecialShot || false;
+    const isGoldenGoal = !!this.isSuddenDeath;
 
     // Reset flag speciale
     this.ball.isSpecialShot = false;
 
     if (this.options.onGoal) {
-      this.options.onGoal(scoringTeam, this.score, scorer, isSpecialGoal);
+      this.options.onGoal(scoringTeam, this.score, scorer, isSpecialGoal, isGoldenGoal);
     }
     this.emitGameEvent({
       event: 'goal',
       scoringTeam,
       score: [...this.score],
       scorerId: scorer && scorer.charData ? scorer.charData.id : null,
-      isSpecialGoal
+      isSpecialGoal,
+      goldenGoal: isGoldenGoal
     });
   }
 
   // Aggiorna visuali interpolate lato Client (niente fisica/AI locale in conflitto con Host)
   updateClientVisuals(dt) {
     const smooth = this._snapNextState ? 1.0 : Math.min(1.0, 1 - Math.pow(0.0004, dt));
-    const timeNow = performance.now();
 
     const syncTeamVisuals = (teamArr) => {
       teamArr.forEach(p => {
@@ -3226,17 +3687,12 @@ export class FootballGame {
           p.z += (p.netZ - p.z) * smooth;
           if (typeof p.netRot === 'number') p.rot = p.netRot;
           const speed = dt > 0 ? Math.hypot(p.x - prevX, p.z - prevZ) / dt : 0;
-          if (this.state === 'goal' && p.team === this.lastScoringTeam) {
-            p.mesh.position.y = Math.abs(Math.sin(timeNow * 0.008)) * 1.2;
-          } else if (speed > 0.5 && !p.isExpelled && !p.isSliding) {
-            p.mesh.position.y = Math.sin(timeNow * 0.015) * 0.12 * p.scale;
-          } else {
-            p.mesh.position.y = 0;
-          }
-          p.mesh.position.x = p.x;
-          p.mesh.position.z = p.z;
+          p.mesh.position.set(p.x, 0, p.z);
           p.mesh.rotation.y = p.rot;
-          p.mesh.rotation.x = p.isSliding ? Math.PI / 3 : 0;
+          p.mesh.rotation.x = 0;
+          p.mesh.rotation.z = 0;
+          const celebrating = (this.state === 'goal' && p.team === this.lastScoringTeam);
+          this._updatePlayerRigAnimation(p, speed, dt, celebrating);
         }
       });
     };
@@ -3258,15 +3714,16 @@ export class FootballGame {
     if (this.isDestroyed) return;
     this.rafId = requestAnimationFrame(this.animate);
 
+    const nowTime = (typeof time === 'number' && Number.isFinite(time)) ? time : performance.now();
     // Se in pausa, renderizza la scena ferma e non avanzare timer o logica
     if (this.isPaused) {
       this.renderer.render(this.scene, this.camera);
-      this.lastTime = time;
+      this.lastTime = nowTime;
       return;
     }
 
-    const dt = Math.min((time - this.lastTime) / 1000, 0.1);
-    this.lastTime = time;
+    const dt = Math.max(0, Math.min((nowTime - this.lastTime) / 1000, 0.1));
+    this.lastTime = nowTime;
 
     // 1. Processa input locale (tastiera, touch stick e buffer carica/rilascio)
     this.processInput(dt);
@@ -3278,13 +3735,27 @@ export class FootballGame {
         this.chargeMeter(1, dt * 2.8);
         this.chargeMeter(2, dt * 2.8);
 
-        // Aggiorna timer partita
+        // Aggiorna timer partita (con Sudden Death 30s in caso di pareggio)
         this.matchTime = Math.max(0, this.matchTime - dt);
         if (this.matchTime <= 0) {
-          this.state = 'ended';
-          sounds.playWhistle(true);
-          this.emitGameEvent({ event: 'match_end', score: [...this.score] });
-          if (this.options.onMatchEnd) this.options.onMatchEnd(this.score);
+          if (!this.isSuddenDeath && this.score[0] === this.score[1]) {
+            this.isSuddenDeath = true;
+            this.matchTime = 30;
+            this.goalShieldTimer = 0;
+            this.goalShieldTeam = 0;
+            this.resetKickoff(1);
+            sounds.playWhistle(false);
+            const sdMsg = '⚡ PAREGGIO! SUDDEN DEATH 30s — CHI SEGNA VINCE!';
+            if (this.options.onToast) this.options.onToast(sdMsg);
+            this.emitGameEvent({ event: 'sudden_death', duration: 30, score: [...this.score] });
+          } else {
+            this.state = 'ended';
+            sounds.playWhistle(true);
+            this.emitGameEvent({ event: 'match_end', score: [...this.score], goldenGoal: false });
+            if (this.options.onMatchEnd) {
+              this.options.onMatchEnd(this.score, { goldenGoal: false, suddenDeath: this.isSuddenDeath });
+            }
+          }
         }
 
         // Aggiorna Squadra 1 (Host / Locale o Peer remoto o AI)
@@ -3332,16 +3803,29 @@ export class FootballGame {
         this.goalCelebrationTimer -= dt;
         this.updateBall(dt);
 
-        // Fai esultare i giocatori della squadra che ha appena segnato il gol
-        const celebratingTeam = (this.lastScoringTeam === 1) ? this.playersTeam1 : this.playersTeam2;
-        celebratingTeam.forEach(p => {
-          p.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.008)) * 1.2;
+        // Fai esultare i giocatori della squadra che ha appena segnato il gol con animazione 3D completa
+        this.playersTeam1.forEach(p => {
+          p.mesh.position.set(p.x, 0, p.z);
+          this._updatePlayerRigAnimation(p, 0, dt, this.lastScoringTeam === 1);
+        });
+        this.playersTeam2.forEach(p => {
+          p.mesh.position.set(p.x, 0, p.z);
+          this._updatePlayerRigAnimation(p, 0, dt, this.lastScoringTeam === 2);
         });
 
         if (this.goalCelebrationTimer <= 0) {
-          // La squadra che ha subito gol batte il calcio d'inizio
-          const nextKickoffTeam = (this.lastScoringTeam === 1) ? 2 : 1;
-          this.resetKickoff(nextKickoffTeam);
+          if (this.isSuddenDeath) {
+            this.state = 'ended';
+            sounds.playWhistle(true);
+            this.emitGameEvent({ event: 'match_end', score: [...this.score], goldenGoal: true });
+            if (this.options.onMatchEnd) {
+              this.options.onMatchEnd(this.score, { goldenGoal: true, suddenDeath: true });
+            }
+          } else {
+            // La squadra che ha subito gol batte il calcio d'inizio
+            const nextKickoffTeam = (this.lastScoringTeam === 1) ? 2 : 1;
+            this.resetKickoff(nextKickoffTeam);
+          }
         }
       }
     } else {
@@ -3382,7 +3866,7 @@ export class FootballGame {
           const sX = (isMine ? 3.5 : (isOtherHuman ? 3.1 : 2.7)) * p.scale;
           const sY = (isMine ? 0.88 : (isOtherHuman ? 0.78 : 0.68)) * p.scale;
           p.nameTag.scale.set(sX, sY, 1);
-          p.nameTag.position.y = 3.85 * p.scale;
+          p.nameTag.position.y = 4.05 * p.scale;
         }
       });
     };
@@ -3390,26 +3874,34 @@ export class FootballGame {
     renderTeamIndicators(this.playersTeam1, 1, this.activePlayerIdx1);
     renderTeamIndicators(this.playersTeam2, 2, this.activePlayerIdx2);
 
-    // 4. Telecamera dinamica 2.5D campetto all'aperto (inquadra tutto il campo + edifici gialli, albero e montagna)
-    let focusX = this.ball.x * 0.45;
-    let focusZ = this.ball.z * 0.36;
-    let camHeight = 36;
-    let camZOffset = 48.5;
+    // 4. Telecamera 3D dinamica campetto all'aperto (prospettiva tridimensionale su personaggi, porte ed edifici)
+    const aspect = (this.camera && this.camera.aspect) ? this.camera.aspect : 1.77;
+    const narrowBoost = Math.max(0, 1.45 - aspect) * 14;
+    let focusX = this.ball.x * 0.44;
+    let focusZ = this.ball.z * 0.34;
+    let camHeight = 23.5 + narrowBoost * 0.55;
+    let camZOffset = 44.5 + narrowBoost * 0.90;
     if (this.controlMode !== '1v1') {
       const localP = this._getLocalControlledPlayer();
       if (localP) {
         focusX = this.ball.x * 0.34 + localP.x * 0.14;
         focusZ = this.ball.z * 0.28 + localP.z * 0.12;
-        camHeight = 39.5;
-        camZOffset = 51.5;
+        camHeight = 25.5 + narrowBoost * 0.55;
+        camZOffset = 47.0 + narrowBoost * 0.90;
       }
+    }
+    if (this.state === 'goal') {
+      camHeight -= 3.2;
+      camZOffset -= 6.0;
     }
     const targetCamX = focusX;
     const targetCamZ = focusZ + camZOffset;
-    this.camera.position.x += (targetCamX - this.camera.position.x) * 3.5 * dt;
-    this.camera.position.y += (camHeight - this.camera.position.y) * 2.5 * dt;
-    this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.5 * dt;
-    this.camera.lookAt(focusX, 0.8, focusZ * 0.9);
+    const lerpXZ = 1 - Math.exp(-3.5 * dt);
+    const lerpY = 1 - Math.exp(-2.5 * dt);
+    this.camera.position.x += (targetCamX - this.camera.position.x) * lerpXZ;
+    this.camera.position.y += (camHeight - this.camera.position.y) * lerpY;
+    this.camera.position.z += (targetCamZ - this.camera.position.z) * lerpXZ;
+    this.camera.lookAt(focusX * 0.88, 1.5, focusZ * 0.78);
 
     // Applicazione Camera Shake per impatto arcade
     if (this.cameraShake > 0.01) {
@@ -3431,6 +3923,7 @@ export class FootballGame {
       this.options.onUpdateHUD({
         score: this.score,
         matchTime: Math.ceil(this.matchTime),
+        isSuddenDeath: !!this.isSuddenDeath,
         ball: { x: this.ball.x, z: this.ball.z },
         hasBall: this.userTeamHasBall(),
         iHaveBall: this.localPlayerHasBall(),
@@ -3471,6 +3964,7 @@ export class FootballGame {
       type: 'state',
       score: this.score,
       time: Math.ceil(this.matchTime),
+      sd: !!this.isSuddenDeath,
       state: this.state,
       hm: this._computeHumanMask(),
       active1: this.activePlayerIdx1,
@@ -3495,14 +3989,20 @@ export class FootballGame {
         z: Number(p.z.toFixed(2)),
         rot: Number(p.rot.toFixed(2)),
         s: !!p.isSliding,
-        ex: !!p.isExpelled
+        ex: !!p.isExpelled,
+        ka: (p.kickAnim > 0) ? 1 : 0,
+        dv: (p.diveTimer > 0) ? (p.diveDir || 1) : 0,
+        ae: (p.aerialTimer > 0) ? 1 : 0
       })),
       t2: this.playersTeam2.map(p => ({
         x: Number(p.x.toFixed(2)),
         z: Number(p.z.toFixed(2)),
         rot: Number(p.rot.toFixed(2)),
         s: !!p.isSliding,
-        ex: !!p.isExpelled
+        ex: !!p.isExpelled,
+        ka: (p.kickAnim > 0) ? 1 : 0,
+        dv: (p.diveTimer > 0) ? (p.diveDir || 1) : 0,
+        ae: (p.aerialTimer > 0) ? 1 : 0
       }))
     };
     this.options.networkManager.send(packet, true);
@@ -3515,6 +4015,7 @@ export class FootballGame {
     const firstPacket = (typeof this.ball.netX !== 'number');
     this.score = packet.score;
     this.matchTime = packet.time;
+    if (typeof packet.sd === 'boolean') this.isSuddenDeath = packet.sd;
     this.state = packet.state;
     if (typeof packet.active1 === 'number') this.activePlayerIdx1 = packet.active1;
     if (typeof packet.active2 === 'number') this.activePlayerIdx2 = packet.active2;
@@ -3584,6 +4085,15 @@ export class FootballGame {
         p.netRot = data.rot;
         p.isSliding = !!data.s;
         p.isExpelled = !!data.ex;
+        if (data.ka && !p._netKaPrev) p.kickAnim = 0.28;
+        p._netKaPrev = !!data.ka;
+        if (data.dv && !p._netDvPrev) {
+          p.diveDir = data.dv;
+          p.diveTimer = 0.45;
+        }
+        p._netDvPrev = !!data.dv;
+        if (data.ae && !p._netAePrev) p.aerialTimer = 0.48;
+        p._netAePrev = !!data.ae;
         if (firstPacket || this._snapNextState) {
           p.x = data.x;
           p.z = data.z;
