@@ -7,12 +7,12 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>MSoccer - Calcio 2.5D Arcade Multiplayer</title>
-  <link rel="stylesheet" href="css/style.css?v=2.9">
+  <link rel="stylesheet" href="css/style.css?v=3.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>">
   
   <!-- Three.js e PeerJS (CDN affidabili e veloci) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(s);"></script>
 </head>
 <body>
 
@@ -80,7 +80,7 @@
         </div>
 
         <p style="color: #cbd5e1; font-size: 1.1rem;">Entra con un codice esistente:</p>
-        <input type="text" id="join-room-input" class="room-input" placeholder="ES: MS-X7K2" maxlength="16">
+        <input type="text" id="join-room-input" class="room-input" placeholder="ES: MS-X7K2" maxlength="120" autocomplete="off" autocorrect="off" autocapitalize="characters" enterkeyhint="go">
         <button id="btn-join-room" class="btn btn-accent">
           <span>🚀</span> Unisciti alla Partita
         </button>
@@ -96,7 +96,7 @@
   <div id="draft-screen" class="modal-screen character-select-screen hidden interactive">
     <div class="draft-header">
       <h2 style="font-size: 3rem; color: #fff;">SCEGLI I TUOI CAMPIONI (3v3)</h2>
-      <p style="color: var(--primary); font-size: 1.1rem; text-transform: uppercase;">
+      <p id="draft-role-subtitle" style="color: var(--primary); font-size: 1.1rem; text-transform: uppercase;">
         Clicca su 3 personaggi per comporre la tua formazione
       </p>
     </div>
@@ -321,6 +321,6 @@
   </div>
 
   <!-- Script Principale (ES Module) -->
-  <script type="module" src="js/app.js?v=2.9"></script>
+  <script type="module" src="js/app.js?v=3.0"></script>
 </body>
 </html>

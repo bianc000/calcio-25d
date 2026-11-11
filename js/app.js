@@ -1,8 +1,8 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=2.9';
-import { FootballGame } from './game.js?v=2.9';
-import { NetworkManager } from './network.js?v=2.9';
-import { sounds } from './audio.js?v=2.9';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.0';
+import { FootballGame } from './game.js?v=3.0';
+import { NetworkManager } from './network.js?v=3.0';
+import { sounds } from './audio.js?v=3.0';
 
 class App {
   constructor() {
@@ -13,6 +13,8 @@ class App {
     this.team1Picked = [];
     this.team2Picked = [];
     this.currentDraftTeam = 1; // 1 o 2
+    this.clientInputInterval = null;
+    this._lastSentAxis = '';
 
     this.cacheDOMElements();
     this.bindEvents();
@@ -93,21 +95,34 @@ class App {
     // Online
     document.getElementById('btn-create-room').onclick = () => this.startHosting();
     document.getElementById('btn-join-room').onclick = () => this.joinRoom();
+    if (this.joinRoomInput) {
+      this.joinRoomInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.joinRoom();
+        }
+      });
+    }
     document.getElementById('btn-copy-link').onclick = () => this.copyRoomLink();
     document.getElementById('btn-back-menu').onclick = () => {
       sounds.playBeep();
+      if (this.net) {
+        this.net.disconnect();
+        this.net = null;
+      }
+      this.resetOnlineLobbyUI();
       this.onlineScreen.classList.add('hidden');
       this.menuScreen.classList.remove('hidden');
     };
 
     // Draft
-    document.getElementById('btn-start-match').onclick = () => this.startMatch();
+    document.getElementById('btn-start-match').onclick = () => this.requestStartMatch();
 
     // Game Over
     document.getElementById('btn-rematch').onclick = () => {
       sounds.playBeep();
       this.gameOverScreen.classList.add('hidden');
-      this.startMatch();
+      this.requestStartMatch();
     };
     document.getElementById('btn-menu-exit').onclick = () => {
       sounds.playBeep();
@@ -125,7 +140,7 @@ class App {
     if (btnRestart) btnRestart.onclick = () => {
       sounds.playBeep();
       if (this.pauseModal) this.pauseModal.classList.add('hidden');
-      this.startMatch();
+      this.requestStartMatch();
     };
 
     const btnPauseMenu = document.getElementById('btn-pause-menu');
@@ -247,12 +262,9 @@ class App {
         btnPass.classList.add('active');
         if (this.game) {
           if (this.game.userTeamHasBall()) {
-            this.game.input.passTrigger = true;
-            this.game.input.passBufferTimer = 0.5;
+            this.game.triggerInputPass();
           } else {
-            const myTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
-            this.game.switchActivePlayer(myTeam);
-            this.game.input.switchTrigger = true;
+            this.game.triggerInputSwitch();
           }
         }
         sounds.playBeep(700, 0.04);
@@ -266,11 +278,7 @@ class App {
       btnShoot.addEventListener('touchstart', (e) => {
         btnShoot.classList.add('active');
         if (this.game) {
-          this.game.input.isChargingShot = true;
-          this.game.input.shotPower = Math.max(this.game.input.shotPower, 0.5);
-          if (!this.game.userTeamHasBall()) {
-            this.game.input.slideTrigger = true;
-          }
+          this.game.startInputShotCharge();
         }
         sounds.playBeep(520, 0.04);
         e.preventDefault();
@@ -279,9 +287,7 @@ class App {
       const handleShootRelease = (e) => {
         btnShoot.classList.remove('active');
         if (this.game) {
-          this.game.input.isChargingShot = false;
-          this.game.input.shootTrigger = true;
-          this.game.input.shotBufferTimer = 0.5;
+          this.game.releaseInputShot();
         }
         if (e && e.cancelable) e.preventDefault();
       };
@@ -294,9 +300,7 @@ class App {
       btnSwitch.addEventListener('touchstart', (e) => {
         btnSwitch.classList.add('active');
         if (this.game) {
-          const myTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
-          this.game.switchActivePlayer(myTeam);
-          this.game.input.switchTrigger = true;
+          this.game.triggerInputSwitch();
         }
         sounds.playBeep(620, 0.03);
         e.preventDefault();
@@ -311,8 +315,7 @@ class App {
       btnSpecial.addEventListener('touchstart', (e) => {
         btnSpecial.classList.add('active');
         if (this.game) {
-          const myTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
-          this.game.triggerSpecial(myTeam);
+          this.game.triggerInputSpecial();
         }
         sounds.playBeep(880, 0.05);
         e.preventDefault();
@@ -328,45 +331,102 @@ class App {
     if (room) {
       this.gameMode = 'online';
       this.isHost = false;
-      this.joinRoomInput.value = room.toUpperCase();
+      this.joinRoomInput.value = room.trim().toUpperCase();
       this.openOnlineModal();
       this.showToast("Stanza rilevata dal link! Clicca 'Unisciti'");
     }
   }
 
   openOnlineModal() {
+    this.resetOnlineLobbyUI();
+    const waitBox = document.getElementById('host-waiting-box');
+    if (waitBox) waitBox.style.display = 'none';
     this.menuScreen.classList.add('hidden');
     this.onlineScreen.classList.remove('hidden');
   }
 
+  resetOnlineLobbyUI() {
+    const createBtn = document.getElementById('btn-create-room');
+    const joinBtn = document.getElementById('btn-join-room');
+    if (createBtn) {
+      createBtn.disabled = false;
+      createBtn.innerText = '➕ Crea Stanza Online';
+    }
+    if (joinBtn) {
+      joinBtn.disabled = false;
+      joinBtn.innerText = '🔗 Unisciti';
+    }
+  }
+
   startHosting() {
+    const createBtn = document.getElementById('btn-create-room');
+    if (createBtn) {
+      createBtn.disabled = true;
+      createBtn.innerText = '⏳ Creazione stanza...';
+    }
+    if (this.net) {
+      this.net.disconnect();
+      this.net = null;
+    }
+
     this.net = new NetworkManager({
       onHostReady: (roomId) => {
         const fullUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
         this.hostRoomCodeEl.innerText = roomId;
         this.roomShareUrl.innerText = fullUrl;
         document.getElementById('host-waiting-box').style.display = 'block';
+        if (createBtn) {
+          createBtn.disabled = false;
+          createBtn.innerText = '🔄 Rigenera Codice';
+        }
         this.showToast("Stanza creata! Invia il link o codice all'amico");
       },
       onConnect: () => {
         this.showToast("Amico connesso! Inizia la selezione squadra");
         this.gameMode = 'online';
         this.isHost = true;
+        this.resetOnlineLobbyUI();
         this.onlineScreen.classList.add('hidden');
         this.openDraft();
+        if (this.net && this.net.connected) {
+          this.net.send({
+            type: 'draft_sync',
+            team1: [...this.team1Picked],
+            team2: [...this.team2Picked]
+          });
+        }
       },
       onData: (data) => this.handleNetworkData(data),
-      onError: (err) => this.showToast("Errore di rete: " + err.message)
+      onDisconnect: () => {
+        this.resetOnlineLobbyUI();
+        this.showToast("⚠️ Connessione con l'avversario interrotta.");
+      },
+      onError: (err) => {
+        this.resetOnlineLobbyUI();
+        this.showToast("Errore di rete: " + (err && err.message ? err.message : 'connessione fallita'));
+      }
     });
 
-    this.net.hostGame();
+    this.net.hostGame().catch(() => {
+      this.resetOnlineLobbyUI();
+    });
   }
 
   joinRoom() {
-    const code = this.joinRoomInput.value.trim().toUpperCase();
-    if (!code) {
-      alert("Inserisci un codice stanza valido!");
+    const raw = this.joinRoomInput ? this.joinRoomInput.value.trim() : '';
+    if (!raw) {
+      this.showToast("Inserisci un codice stanza valido (es. MS-AB12) o il link!");
       return;
+    }
+
+    const joinBtn = document.getElementById('btn-join-room');
+    if (joinBtn) {
+      joinBtn.disabled = true;
+      joinBtn.innerText = '⏳ Connessione...';
+    }
+    if (this.net) {
+      this.net.disconnect();
+      this.net = null;
     }
 
     this.net = new NetworkManager({
@@ -374,21 +434,33 @@ class App {
         this.showToast("Connesso con successo alla stanza!");
         this.gameMode = 'online';
         this.isHost = false;
+        this.resetOnlineLobbyUI();
         this.onlineScreen.classList.add('hidden');
         this.openDraft();
       },
       onData: (data) => this.handleNetworkData(data),
-      onError: (err) => this.showToast("Impossibile connettersi: " + err.message)
+      onDisconnect: () => {
+        this.resetOnlineLobbyUI();
+        this.showToast("⚠️ Connessione con l'Host interrotta.");
+      },
+      onError: (err) => {
+        this.resetOnlineLobbyUI();
+        this.showToast("Impossibile connettersi: " + (err && err.message ? err.message : 'riprova'));
+      }
     });
 
-    this.net.joinGame(code);
+    this.net.joinGame(raw).catch(() => {
+      this.resetOnlineLobbyUI();
+    });
   }
 
   copyRoomLink() {
     const url = this.roomShareUrl.innerText;
-    if (navigator.clipboard) {
+    if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(url).then(() => {
         this.showToast("Link partita copiato negli appunti!");
+      }).catch(() => {
+        prompt("Copia questo link e invialo al tuo amico:", url);
       });
     } else {
       prompt("Copia questo link e invialo al tuo amico:", url);
@@ -396,11 +468,37 @@ class App {
   }
 
   handleNetworkData(data) {
-    if (data.type === 'draft_update') {
-      this.team1Picked = data.team1;
-      this.team2Picked = data.team2;
+    if (!data || !data.type) return;
+
+    if (data.type === 'draft_sync') {
+      if (Array.isArray(data.team1)) this.team1Picked = [...data.team1];
+      if (Array.isArray(data.team2)) this.team2Picked = [...data.team2];
+      this.updateDraftSlots();
+    } else if (data.type === 'draft_team') {
+      if (data.team === 1 && Array.isArray(data.picks)) {
+        this.team1Picked = [...data.picks];
+      } else if (data.team === 2 && Array.isArray(data.picks)) {
+        this.team2Picked = [...data.picks];
+      }
+      this.updateDraftSlots();
+    } else if (data.type === 'draft_update') {
+      if (Array.isArray(data.team1) && data.team1.length > 0) this.team1Picked = [...data.team1];
+      if (Array.isArray(data.team2) && data.team2.length > 0) this.team2Picked = [...data.team2];
       this.updateDraftSlots();
       if (data.readyToPlay) {
+        this.startMatch(false);
+      }
+    } else if (data.type === 'client_start_request') {
+      if (this.isHost) {
+        if (Array.isArray(data.team2) && data.team2.length === 3) {
+          this.team2Picked = [...data.team2];
+        }
+        this.startMatch(true);
+      }
+    } else if (data.type === 'start_match') {
+      if (!this.isHost) {
+        if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
+        if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
         this.startMatch(false);
       }
     } else if (data.type === 'state') {
@@ -410,6 +508,19 @@ class App {
     } else if (data.type === 'remote_input') {
       if (this.game && this.isHost) {
         this.game.setRemoteInput(data.input);
+      }
+    } else if (data.type === 'remote_action') {
+      if (this.game && this.isHost) {
+        this.game.handleRemoteAction(data);
+      }
+    } else if (data.type === 'game_event') {
+      if (this.game && !this.isHost) {
+        this.game.applyNetworkEvent(data);
+      }
+    } else if (data.type === 'pause_sync') {
+      if (this.game && !this.isHost) {
+        this.game.isPaused = !!data.paused;
+        this._syncPauseOverlay(this.game.isPaused);
       }
     } else if (data.type === 'emote') {
       this.showToast("Amico: " + data.text);
@@ -476,16 +587,26 @@ class App {
 
   openDraft() {
     this.menuScreen.classList.add('hidden');
+    this.onlineScreen.classList.add('hidden');
     this.draftScreen.classList.remove('hidden');
 
-    // Default pre-selections
-    if (this.gameMode === 'cpu') {
+    // Default pre-selections (entrambe le parti hanno una base valida fin da subito)
+    if (this.gameMode === 'cpu' || this.isHost) {
       this.team1Picked = ['ento', 'lindi', 'bubi'];
       this.team2Picked = ['pibe', 'matti', 'jelmo'];
     } else {
-      if (this.isHost) {
-        this.team1Picked = ['ento', 'lindi', 'bubi'];
-        this.team2Picked = ['pibe', 'matti', 'jelmo'];
+      if (this.team1Picked.length === 0) this.team1Picked = ['ento', 'lindi', 'bubi'];
+      if (this.team2Picked.length === 0) this.team2Picked = ['pibe', 'matti', 'jelmo'];
+    }
+
+    const subtitleEl = document.getElementById('draft-role-subtitle');
+    if (subtitleEl) {
+      if (this.gameMode === 'online') {
+        subtitleEl.innerText = this.isHost
+          ? 'SEI SQUADRA 1 (ROSSI — HOST)! Scegli i tuoi 3 giocatori e premi Scendi in Campo'
+          : 'SEI SQUADRA 2 (BLU — OSPITE)! Scegli i tuoi 3 giocatori e premi Scendi in Campo';
+      } else {
+        subtitleEl.innerText = 'Seleziona 3 compagni per la tua Squadra 1 e 3 avversari per la Squadra 2 (3 vs 3)';
       }
     }
 
@@ -495,7 +616,7 @@ class App {
   handleCharacterClick(charId) {
     sounds.playBeep(650, 0.05);
 
-    // Se giochiamo online da client, decidiamo la Squadra 2
+    // Online Client controlla Squadra 2; Host e CPU controllano Squadra 1
     const targetTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
     const teamArray = (targetTeam === 1) ? this.team1Picked : this.team2Picked;
 
@@ -514,13 +635,12 @@ class App {
 
     this.updateDraftSlots();
 
-    // Se online, sincronizza con l'altro peer
-    if (this.net && this.net.connected) {
+    // Online: invia solo la squadra di competenza per evitare sovrascritture incrociate
+    if (this.gameMode === 'online' && this.net && this.net.connected) {
       this.net.send({
-        type: 'draft_update',
-        team1: this.team1Picked,
-        team2: this.team2Picked,
-        readyToPlay: false
+        type: 'draft_team',
+        team: targetTeam,
+        picks: [...teamArray]
       });
     }
   }
@@ -569,23 +689,58 @@ class App {
     startBtn.style.opacity = isReady ? '1' : '0.5';
   }
 
-  startMatch(notifyRemote = true) {
+  requestStartMatch() {
     if (this.team1Picked.length < 3 || this.team2Picked.length < 3) {
-      alert("Seleziona 3 giocatori per entrambe le squadre prima di scendere in campo!");
+      this.showToast("Seleziona 3 giocatori per entrambe le squadre prima di iniziare!");
       return;
     }
 
-    if (notifyRemote && this.net && this.net.connected) {
+    if (this.gameMode === 'online' && !this.isHost) {
+      if (this.net && this.net.connected) {
+        this.net.send({
+          type: 'client_start_request',
+          team2: [...this.team2Picked]
+        });
+        this.showToast("Richiesta avvio inviata all'Host...");
+      } else {
+        this.showToast("Connessione con l'Host persa.");
+      }
+      return;
+    }
+
+    this.startMatch(true);
+  }
+
+  startMatch(notifyRemote = true) {
+    if (this.team1Picked.length < 3 || this.team2Picked.length < 3) {
+      this.showToast("Seleziona 3 giocatori per entrambe le squadre prima di iniziare!");
+      return;
+    }
+
+    if (notifyRemote && this.gameMode === 'online' && this.isHost && this.net && this.net.connected) {
       this.net.send({
-        type: 'draft_update',
-        team1: this.team1Picked,
-        team2: this.team2Picked,
-        readyToPlay: true
+        type: 'start_match',
+        team1: [...this.team1Picked],
+        team2: [...this.team2Picked]
       });
     }
 
+    // Pulizia ciclo e istanza precedente per rematch/restart puliti senza leak
+    if (this.clientInputInterval) {
+      clearInterval(this.clientInputInterval);
+      this.clientInputInterval = null;
+    }
+    if (this.game && this.game.destroy) {
+      this.game.destroy();
+      this.game = null;
+    }
+    this._lastSentAxis = '';
+
     sounds.playWhistle(false);
     this.draftScreen.classList.add('hidden');
+    if (this.gameOverScreen) this.gameOverScreen.classList.add('hidden');
+    if (this.pauseModal) this.pauseModal.classList.add('hidden');
+    if (this.goalBanner) this.goalBanner.classList.remove('active');
     this.inGameHud.style.display = 'flex';
 
     // Rimuovi canvas precedente se presente
@@ -596,7 +751,7 @@ class App {
       team1: this.team1Picked,
       team2: this.team2Picked,
       isSinglePlayer: (this.gameMode === 'cpu'),
-      isHost: this.isHost,
+      isHost: (this.gameMode === 'online' && this.isHost),
       isClient: (this.gameMode === 'online' && !this.isHost),
       networkManager: this.net,
       onTogglePause: () => this.togglePause(),
@@ -604,21 +759,43 @@ class App {
       onToast: (msg) => this.showToast(msg),
       onGoal: (team, score, scorer, isSpecial) => this.handleGoal(team, score, scorer, isSpecial),
       onMatchEnd: (score) => this.handleMatchEnd(score),
-      onUpdateHUD: (hudData) => this.updateHUD(hudData)
+      onUpdateHUD: (hudData) => this.updateHUD(hudData),
+      onClientAction: (actionPayload) => {
+        if (this.net && this.net.connected) {
+          this.net.send({ type: 'remote_action', ...actionPayload });
+        }
+      },
+      onGameEvent: (eventPayload) => {
+        if (this.net && this.net.connected) {
+          this.net.send({ type: 'game_event', ...eventPayload });
+        }
+      }
     });
 
-    this.game.resetKickoff(1);
+    if (this.gameMode !== 'online' || this.isHost) {
+      this.game.resetKickoff(1);
+      if (this.gameMode === 'online' && this.isHost && this.net && this.net.connected) {
+        this.game.sendNetworkState();
+      }
+    }
 
-    // Se siamo client online, trasmetti gli input con tick rate di 40 Hz
+    // Se siamo client online, trasmetti movimento continuo (volatile 30Hz); le azioni partono via onClientAction
     if (this.gameMode === 'online' && !this.isHost && this.net) {
-      setInterval(() => {
-        if (this.game && this.net.connected) {
+      this.clientInputInterval = setInterval(() => {
+        if (!this.game || this.game.isDestroyed || !this.net || !this.net.connected) return;
+        const inp = this.game.input;
+        const moveX = Number((inp.moveX || 0).toFixed(2));
+        const moveZ = Number((inp.moveZ || 0).toFixed(2));
+        const sprint = !!inp.sprint;
+        const sig = `${moveX}|${moveZ}|${sprint ? 1 : 0}`;
+        if (sig !== this._lastSentAxis || moveX !== 0 || moveZ !== 0 || sprint) {
+          this._lastSentAxis = sig;
           this.net.send({
             type: 'remote_input',
-            input: this.game.input
-          });
+            input: { moveX, moveZ, sprint }
+          }, true);
         }
-      }, 25);
+      }, 33);
     }
   }
 
@@ -632,7 +809,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=2.9`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.0`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
@@ -711,20 +888,36 @@ class App {
     }
   }
 
-  togglePause() {
+  _syncPauseOverlay(isPaused) {
     if (!this.game) return;
-    const isPaused = this.game.togglePause();
     if (isPaused) {
       sounds.playBeep(480, 0.08);
       if (this.pauseScore1) this.pauseScore1.innerText = this.game.score[0];
       if (this.pauseScore2) this.pauseScore2.innerText = this.game.score[1];
-      const mins = Math.floor(this.game.matchTime / 60);
-      const secs = (this.game.matchTime % 60).toString().padStart(2, '0');
+      const t = Math.ceil(this.game.matchTime || 0);
+      const mins = Math.floor(t / 60);
+      const secs = (t % 60).toString().padStart(2, '0');
       if (this.pauseClock) this.pauseClock.innerText = `${mins}:${secs}`;
       if (this.pauseModal) this.pauseModal.classList.remove('hidden');
     } else {
       sounds.playBeep(650, 0.06);
       if (this.pauseModal) this.pauseModal.classList.add('hidden');
+    }
+  }
+
+  togglePause() {
+    if (!this.game) return;
+    if (this.gameMode === 'online' && !this.isHost) {
+      // Lato Client il pannello permette di uscire/riprendere senza bloccare la simulazione Host
+      const currentlyHidden = this.pauseModal ? this.pauseModal.classList.contains('hidden') : true;
+      this._syncPauseOverlay(currentlyHidden);
+      return;
+    }
+
+    const isPaused = this.game.togglePause();
+    this._syncPauseOverlay(isPaused);
+    if (this.gameMode === 'online' && this.isHost && this.net && this.net.connected) {
+      this.net.send({ type: 'pause_sync', paused: isPaused });
     }
   }
 
@@ -846,5 +1039,5 @@ class App {
 
 // Avvio automatico quando il DOM è pronto
 window.addEventListener('DOMContentLoaded', () => {
-  new App();
+  window.__msoccerApp = new App();
 });

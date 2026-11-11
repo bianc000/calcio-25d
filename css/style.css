@@ -21,6 +21,12 @@
   -webkit-user-select: none;
 }
 
+input, textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  touch-action: manipulation;
+}
+
 body, html {
   width: 100%;
   height: 100%;
@@ -82,6 +88,8 @@ h1, h2, h3 {
   padding: 20px;
   opacity: 1;
   transition: opacity 0.3s ease, visibility 0.3s ease;
+  overflow-y: auto;
+  touch-action: pan-y;
 }
 
 .modal-screen.hidden {
@@ -99,6 +107,7 @@ h1, h2, h3 {
   padding: 35px 45px;
   max-width: 650px;
   width: 90%;
+  margin: auto;
   text-align: center;
   backdrop-filter: blur(10px);
 }
