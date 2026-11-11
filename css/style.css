@@ -265,22 +265,204 @@ h1, h2, h3 {
 
 .slot-item {
   flex: 1;
-  height: 52px;
+  min-height: 60px;
+  padding: 5px 6px;
   background: #0b141f;
   border: 1px dashed #3a5169;
   border-radius: 8px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
   font-family: 'Teko', sans-serif;
-  font-size: 1.3rem;
+  font-size: 1.25rem;
+  line-height: 1.05;
   color: #8fa3b8;
+  transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .slot-item.filled {
   background: #172a3d;
   border: 1px solid var(--primary);
   color: #ffffff;
+}
+
+.slot-item.clickable {
+  cursor: pointer;
+}
+
+.slot-item.clickable:hover {
+  transform: translateY(-2px);
+  border-color: #ffd700;
+}
+
+.slot-item.mine {
+  border: 2px solid #ffd700;
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.45);
+  background: linear-gradient(135deg, #1b3148, #243b55);
+}
+
+.slot-item.human-other {
+  border: 1.5px solid #00f0ff;
+}
+
+.slot-item.cpu-locked {
+  opacity: 0.78;
+  border-style: dotted;
+}
+
+.slot-char-name {
+  font-size: 1.28rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.slot-meta {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #94a3b8;
+}
+
+.slot-item.mine .slot-meta {
+  color: #ffd700;
+}
+
+/* Selettore Modalità 1v1 / 2v2 / 3v3 & TURN opzionale */
+.mode-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+  width: 100%;
+}
+
+.mode-pill {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1.5px solid #334155;
+  border-radius: 10px;
+  padding: 8px 6px;
+  color: #cbd5e1;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-family: 'Teko', sans-serif;
+  transition: all 0.15s ease;
+}
+
+.mode-pill .mode-title {
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mode-pill .mode-sub {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.mode-pill.active {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(14, 165, 233, 0.25));
+  border-color: #00f0ff;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.35);
+}
+
+.mode-pill.active .mode-sub {
+  color: #e0f2fe;
+}
+
+.mode-hint {
+  font-size: 0.86rem;
+  color: #94a3b8;
+  margin-bottom: 16px;
+  min-height: 20px;
+}
+
+.draft-room-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.draft-room-controls.hidden {
+  display: none;
+}
+
+.online-players-badge {
+  background: rgba(0, 240, 255, 0.14);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  color: #7df6ff;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.mode-selector-compact {
+  width: auto;
+  margin-bottom: 0;
+  display: inline-grid;
+}
+
+.mode-selector-compact .mode-pill {
+  padding: 5px 12px;
+  font-size: 1.15rem;
+  flex-direction: row;
+}
+
+.btn-mini {
+  padding: 6px 14px !important;
+  font-size: 1.1rem !important;
+}
+
+.turn-settings {
+  margin-top: 12px;
+  background: rgba(9, 18, 26, 0.7);
+  border: 1px solid #26384a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.turn-settings summary {
+  cursor: pointer;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.turn-settings-body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.turn-help {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #94a3b8;
+}
+
+.turn-input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.85rem;
 }
 
 /* Griglia 12 Personaggi */
@@ -1064,8 +1246,9 @@ body.touch-device .touch-controls {
     margin-bottom: 4px;
   }
   .slot-item {
-    height: 40px;
-    font-size: 1.1rem;
+    min-height: 52px;
+    height: auto;
+    font-size: 1.05rem;
   }
   .characters-grid {
     grid-template-columns: repeat(2, 1fr) !important;

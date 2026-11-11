@@ -1,23 +1,45 @@
 // Inizializzazione Applicazione & Flusso UI
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.0';
-import { FootballGame } from './game.js?v=3.0';
-import { NetworkManager } from './network.js?v=3.0';
-import { sounds } from './audio.js?v=3.0';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.1';
+import { FootballGame } from './game.js?v=3.1';
+import { NetworkManager } from './network.js?v=3.1';
+import { sounds } from './audio.js?v=3.1';
+
+const MODE_HINTS = {
+  '1v1': '<strong>1v1:</strong> Comandi tutta la tua squadra (3v3 con cambio giocatore Q / Spazio). Online: 2 giocatori (1 per squadra).',
+  '2v2': '<strong>2v2:</strong> Ogni giocatore comanda 1 solo personaggio fisso (DIF o ATT). Il Portiere è sempre CPU (max 4 giocatori online).',
+  '3v3': '<strong>3v3:</strong> Ognuno comanda 1 singolo personaggio fisso (POR, DIF o ATT — max 6 giocatori online). I posti vuoti restano CPU.'
+};
+
+const SLOT_ROLES = [
+  { key: 'gk', label: 'POR', icon: '🧤' },
+  { key: 'def', label: 'DIF', icon: '🛡️' },
+  { key: 'fwd', label: 'ATT', icon: '⚡' }
+];
+
+const MODE_MAX_HUMANS = { '1v1': 2, '2v2': 4, '3v3': 6 };
 
 class App {
   constructor() {
     this.game = null;
     this.net = null;
     this.gameMode = 'cpu'; // 'cpu', 'online', 'local'
+    this.controlMode = '1v1'; // '1v1', '2v2', '3v3'
     this.isHost = true;
+    this.myPeerId = 'host';
+    this.localTeam = 1;
+    this.localSlot = 2; // 0=POR, 1=DIF, 2=ATT
+    this.seats = { t1: ['local', 'local', 'local'], t2: [null, null, null], t2Peer: null };
     this.team1Picked = [];
     this.team2Picked = [];
     this.currentDraftTeam = 1; // 1 o 2
     this.clientInputInterval = null;
     this._lastSentAxis = '';
+    this._connectedPeersCount = 0;
 
     this.cacheDOMElements();
     this.bindEvents();
+    this.loadTurnInputs();
+    this._syncModePillsUI();
     
     // Rileva dispositivi touch / smartphone / tablet
     const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (window.innerWidth <= 1024);
@@ -74,13 +96,69 @@ class App {
       sounds.playBeep();
       this.gameMode = 'cpu';
       this.isHost = true;
-      this.openDraft();
+      this.myPeerId = 'local';
+      this.assignDefaultSeats(false);
+      this.openDraft(true);
     };
 
     document.getElementById('btn-play-online').onclick = () => {
       sounds.playBeep();
       this.openOnlineModal();
     };
+
+    // Selettori modalità (1v1 / 2v2 / 3v3) su Menu, Online Modal e Draft Host
+    document.querySelectorAll('.mode-pill[data-mode]').forEach(btn => {
+      btn.onclick = () => {
+        const mode = btn.dataset.mode;
+        if (!mode) return;
+        if (this.gameMode === 'online' && !this.isHost && btn.closest('#draft-mode-selector')) {
+          this.showToast("Solo l'Host della stanza può cambiare il formato!");
+          return;
+        }
+        sounds.playBeep(720, 0.04);
+        this.setControlMode(mode, true);
+      };
+    });
+
+    // Click sugli slot squadra nel Draft (scelta ruolo POR/DIF/ATT in 2v2 e 3v3)
+    for (let team = 1; team <= 2; team++) {
+      for (let slot = 0; slot < 3; slot++) {
+        const slotEl = document.getElementById(`slot-t${team}-${slot}`);
+        if (slotEl) {
+          slotEl.onclick = () => this.handleSlotClick(team, slot);
+        }
+      }
+    }
+
+    const btnDraftCopyLink = document.getElementById('btn-draft-copy-link');
+    if (btnDraftCopyLink) btnDraftCopyLink.onclick = () => this.copyRoomLink();
+
+    // Impostazioni opzionali Relay TURN (4G / Reti restrittive)
+    const btnSaveTurn = document.getElementById('btn-save-turn');
+    if (btnSaveTurn) {
+      btnSaveTurn.onclick = () => {
+        const url = (document.getElementById('turn-url-input')?.value || '').trim();
+        const user = (document.getElementById('turn-user-input')?.value || '').trim();
+        const pass = (document.getElementById('turn-pass-input')?.value || '').trim();
+        if (!url) {
+          this.showToast("Inserisci almeno l'URL del server TURN o dominio Metered.");
+          return;
+        }
+        NetworkManager.saveTurnConfig({ url, user, pass });
+        sounds.playBeep(820, 0.05);
+        this.showToast("✅ Configurazione TURN salvata! Ora vale anche su 4G/Wi-Fi diversi.");
+      };
+    }
+
+    const btnClearTurn = document.getElementById('btn-clear-turn');
+    if (btnClearTurn) {
+      btnClearTurn.onclick = () => {
+        NetworkManager.saveTurnConfig(null);
+        this.loadTurnInputs();
+        sounds.playBeep(480, 0.05);
+        this.showToast("Configurazione TURN rimossa.");
+      };
+    }
 
     document.getElementById('btn-rules').onclick = () => {
       sounds.playBeep();
@@ -261,7 +339,7 @@ class App {
       btnPass.addEventListener('touchstart', (e) => {
         btnPass.classList.add('active');
         if (this.game) {
-          if (this.game.userTeamHasBall()) {
+          if (this.game.controlMode !== '1v1' || this.game.userTeamHasBall()) {
             this.game.triggerInputPass();
           } else {
             this.game.triggerInputSwitch();
@@ -337,8 +415,231 @@ class App {
     }
   }
 
+  loadTurnInputs() {
+    const cfg = NetworkManager.getTurnConfig();
+    const urlEl = document.getElementById('turn-url-input');
+    const userEl = document.getElementById('turn-user-input');
+    const passEl = document.getElementById('turn-pass-input');
+    if (urlEl) urlEl.value = (cfg && cfg.url) ? cfg.url : '';
+    if (userEl) userEl.value = (cfg && cfg.user) ? cfg.user : '';
+    if (passEl) passEl.value = (cfg && cfg.pass) ? cfg.pass : '';
+  }
+
+  _syncModePillsUI() {
+    document.querySelectorAll('.mode-pill[data-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === this.controlMode);
+      if (this.gameMode === 'online' && !this.isHost && btn.closest('#draft-mode-selector')) {
+        btn.disabled = true;
+      } else {
+        btn.disabled = false;
+      }
+    });
+    const hintEl = document.getElementById('mode-hint-menu');
+    if (hintEl && MODE_HINTS[this.controlMode]) {
+      hintEl.innerHTML = MODE_HINTS[this.controlMode];
+    }
+    const hostModeLabel = document.getElementById('host-room-mode-label');
+    if (hostModeLabel) {
+      hostModeLabel.innerText = this.controlMode;
+    }
+    this.updateOnlineBadges();
+  }
+
+  _cloneSeats() {
+    return {
+      t1: [...(this.seats.t1 || [null, null, null])],
+      t2: [...(this.seats.t2 || [null, null, null])],
+      t2Peer: this.seats.t2Peer || null
+    };
+  }
+
+  _removePeerFromSeats(peerId) {
+    if (!peerId || !this.seats) return;
+    if (this.seats.t2Peer === peerId) this.seats.t2Peer = null;
+    for (let s = 0; s < 3; s++) {
+      if (this.seats.t1[s] === peerId) this.seats.t1[s] = null;
+      if (this.seats.t2[s] === peerId) this.seats.t2[s] = null;
+    }
+  }
+
+  _findSeatForPeer(peerId) {
+    if (!peerId || !this.seats) return null;
+    if (this.controlMode === '1v1') {
+      if (peerId === 'host' || peerId === 'local') return { team: 1, slot: 2 };
+      if (this.seats.t2Peer === peerId) return { team: 2, slot: 2 };
+      return null;
+    }
+    for (let s = 0; s < 3; s++) {
+      if (this.controlMode === '2v2' && s === 0) continue;
+      if (this.seats.t1[s] === peerId) return { team: 1, slot: s };
+      if (this.seats.t2[s] === peerId) return { team: 2, slot: s };
+    }
+    return null;
+  }
+
+  _syncMySeatFromSeats() {
+    const mine = this._findSeatForPeer(this.myPeerId);
+    if (mine) {
+      this.localTeam = mine.team;
+      this.localSlot = mine.slot;
+    } else if (this.gameMode === 'online' && !this.isHost) {
+      this.localTeam = 2;
+      this.localSlot = 2;
+    } else {
+      this.localTeam = 1;
+      this.localSlot = 2;
+    }
+  }
+
+  assignDefaultSeats(preserveConnectedPeers = false) {
+    const existingPeers = (preserveConnectedPeers && this.gameMode === 'online' && this.isHost && this.net && this.net.conns)
+      ? Array.from(this.net.conns.keys())
+      : [];
+
+    if (this.gameMode === 'cpu') {
+      this.localTeam = 1;
+      if (this.controlMode === '1v1') {
+        this.localSlot = 2;
+        this.seats = { t1: ['local', 'local', 'local'], t2: [null, null, null], t2Peer: null };
+      } else {
+        if (this.controlMode === '2v2' && this.localSlot === 0) this.localSlot = 2;
+        this.seats = { t1: [null, null, null], t2: [null, null, null], t2Peer: null };
+        this.seats.t1[this.localSlot] = 'local';
+      }
+      return;
+    }
+
+    // Modalità Online (Host)
+    this.seats = { t1: [null, null, null], t2: [null, null, null], t2Peer: null };
+    if (this.controlMode === '1v1') {
+      this.seats.t1 = ['host', 'host', 'host'];
+      this.localTeam = 1;
+      this.localSlot = 2;
+      existingPeers.forEach((pid, idx) => {
+        if (idx === 0) {
+          this.seats.t2Peer = pid;
+          this.seats.t2 = [pid, pid, pid];
+        } else if (this.net) {
+          this.net.sendTo(pid, { type: 'room_full', controlMode: '1v1', maxHumans: 2 });
+        }
+      });
+    } else {
+      this.seats.t1[2] = 'host';
+      this.localTeam = 1;
+      this.localSlot = 2;
+      existingPeers.forEach(pid => {
+        const assigned = this._autoAssignPeer(pid);
+        if (!assigned && this.net) {
+          this.net.sendTo(pid, {
+            type: 'room_full',
+            controlMode: this.controlMode,
+            maxHumans: MODE_MAX_HUMANS[this.controlMode] || 4
+          });
+        }
+      });
+    }
+  }
+
+  _autoAssignPeer(peerId) {
+    const existing = this._findSeatForPeer(peerId);
+    if (existing) return existing;
+
+    if (this.controlMode === '1v1') {
+      if (this.seats.t2Peer && this.seats.t2Peer !== peerId) return null;
+      this.seats.t2Peer = peerId;
+      this.seats.t2 = [peerId, peerId, peerId];
+      return { team: 2, slot: 2 };
+    }
+
+    const order = (this.controlMode === '2v2')
+      ? [[2, 2], [1, 1], [2, 1], [1, 2]]
+      : [[2, 2], [1, 1], [2, 1], [1, 0], [2, 0], [1, 2]];
+
+    for (const [team, slot] of order) {
+      const arr = (team === 1) ? this.seats.t1 : this.seats.t2;
+      if (!arr[slot]) {
+        arr[slot] = peerId;
+        return { team, slot };
+      }
+    }
+    return null;
+  }
+
+  _tryClaimSeat(peerId, team, slot) {
+    if (this.controlMode === '1v1') {
+      return { ok: false, reason: 'In 1v1 ogni giocatore comanda tutta la propria squadra.' };
+    }
+    if (this.controlMode === '2v2' && slot === 0) {
+      return { ok: false, reason: '🧤 In 2v2 il Portiere è sempre controllato dalla CPU!' };
+    }
+    if ((team !== 1 && team !== 2) || slot < 0 || slot > 2) {
+      return { ok: false, reason: 'Posto non valido.' };
+    }
+    const targetArr = (team === 1) ? this.seats.t1 : this.seats.t2;
+    if (targetArr[slot] === peerId) return { ok: true };
+    if (targetArr[slot]) {
+      return { ok: false, reason: 'Questo ruolo è già occupato da un altro giocatore!' };
+    }
+    this._removePeerFromSeats(peerId);
+    targetArr[slot] = peerId;
+    if (peerId === this.myPeerId) {
+      this.localTeam = team;
+      this.localSlot = slot;
+    }
+    return { ok: true };
+  }
+
+  _getHumanCount() {
+    if (this.gameMode === 'cpu') return 1;
+    if (this.controlMode === '1v1') return this.seats.t2Peer ? 2 : 1;
+    const unique = new Set();
+    [...this.seats.t1, ...this.seats.t2].forEach(v => { if (v) unique.add(v); });
+    return Math.max(1, unique.size);
+  }
+
+  updateOnlineBadges() {
+    const maxHumans = MODE_MAX_HUMANS[this.controlMode] || 2;
+    const count = this._getHumanCount();
+    const badge = document.getElementById('online-players-badge');
+    if (badge) {
+      badge.innerText = `👥 Giocatori: ${count}/${maxHumans} (${this.controlMode})`;
+    }
+    const waitStatus = document.getElementById('host-waiting-status');
+    if (waitStatus) {
+      waitStatus.innerText = count <= 1
+        ? `⏳ In attesa che il tuo amico si unisca (${count}/${maxHumans})...`
+        : `✅ ${count}/${maxHumans} giocatori in stanza!`;
+    }
+  }
+
+  setControlMode(mode, notify = true) {
+    if (!MODE_HINTS[mode]) return;
+    this.controlMode = mode;
+    if (this.gameMode === 'cpu' || this.isHost) {
+      this.assignDefaultSeats(true);
+    }
+    this._syncModePillsUI();
+    this.updateDraftSubtitle();
+    this.updateDraftSlots();
+    if (notify && this.gameMode === 'online' && this.isHost && this.net && this.net.connected) {
+      this.broadcastLobbyState();
+    }
+  }
+
+  broadcastLobbyState() {
+    if (!this.isHost || !this.net || !this.net.connected) return;
+    this.net.send({
+      type: 'lobby_state',
+      controlMode: this.controlMode,
+      team1: [...this.team1Picked],
+      team2: [...this.team2Picked],
+      seats: this._cloneSeats()
+    });
+  }
+
   openOnlineModal() {
     this.resetOnlineLobbyUI();
+    this._syncModePillsUI();
     const waitBox = document.getElementById('host-waiting-box');
     if (waitBox) waitBox.style.display = 'none';
     this.menuScreen.classList.add('hidden');
@@ -369,6 +670,13 @@ class App {
       this.net = null;
     }
 
+    this.gameMode = 'online';
+    this.isHost = true;
+    this.myPeerId = 'host';
+    if (this.team1Picked.length !== 3) this.team1Picked = ['ento', 'lindi', 'bubi'];
+    if (this.team2Picked.length !== 3) this.team2Picked = ['pibe', 'matti', 'jelmo'];
+    this.assignDefaultSeats(false);
+
     this.net = new NetworkManager({
       onHostReady: (roomId) => {
         const fullUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
@@ -379,27 +687,73 @@ class App {
           createBtn.disabled = false;
           createBtn.innerText = '🔄 Rigenera Codice';
         }
-        this.showToast("Stanza creata! Invia il link o codice all'amico");
+        this._syncModePillsUI();
+        this.updateOnlineBadges();
+        this.showToast(`Stanza ${this.controlMode} creata! Invia il link o codice agli amici`);
       },
-      onConnect: () => {
-        this.showToast("Amico connesso! Inizia la selezione squadra");
-        this.gameMode = 'online';
-        this.isHost = true;
-        this.resetOnlineLobbyUI();
-        this.onlineScreen.classList.add('hidden');
-        this.openDraft();
-        if (this.net && this.net.connected) {
-          this.net.send({
-            type: 'draft_sync',
-            team1: [...this.team1Picked],
-            team2: [...this.team2Picked]
+      onPeerConnect: (peerId) => {
+        const seat = this._autoAssignPeer(peerId);
+        if (!seat) {
+          this.net.sendTo(peerId, {
+            type: 'room_full',
+            controlMode: this.controlMode,
+            maxHumans: MODE_MAX_HUMANS[this.controlMode] || 2
           });
+          this.showToast(`Accesso rifiutato: stanza ${this.controlMode} già al completo.`);
+          return;
         }
+
+        const matchActive = Boolean(
+          this.game &&
+          !this.game.isDestroyed &&
+          this.draftScreen.classList.contains('hidden')
+        );
+
+        this.net.sendTo(peerId, {
+          type: 'welcome',
+          peerId,
+          controlMode: this.controlMode,
+          team1: [...this.team1Picked],
+          team2: [...this.team2Picked],
+          seats: this._cloneSeats(),
+          matchActive
+        });
+
+        if (matchActive) {
+          this.game.seats = this._cloneSeats();
+          this.game.sendNetworkState();
+        } else if (this.draftScreen.classList.contains('hidden')) {
+          this.resetOnlineLobbyUI();
+          this.onlineScreen.classList.add('hidden');
+          this.openDraft(false);
+        }
+
+        this.broadcastLobbyState();
+        this.updateOnlineBadges();
+        this.updateDraftSlots();
+
+        const roleMeta = SLOT_ROLES[seat.slot] || SLOT_ROLES[2];
+        const teamName = seat.team === 1 ? 'Rossi' : 'Blu';
+        const msg = (this.controlMode === '1v1')
+          ? 'Amico connesso! Inizia la selezione squadra'
+          : `Amico connesso (${teamName} · ${roleMeta.icon} ${roleMeta.label})!`;
+        this.showToast(msg);
       },
-      onData: (data) => this.handleNetworkData(data),
+      onPeerDisconnect: (peerId) => {
+        this._removePeerFromSeats(peerId);
+        if (this.game && !this.game.isDestroyed) {
+          this.game.releasePeer(peerId);
+          this.game.seats = this._cloneSeats();
+        }
+        this.broadcastLobbyState();
+        this.updateOnlineBadges();
+        this.updateDraftSlots();
+        this.showToast("⚠️ Un giocatore si è disconnesso (passato alla CPU).");
+      },
+      onData: (data, peerId) => this.handleNetworkData(data, peerId),
       onDisconnect: () => {
         this.resetOnlineLobbyUI();
-        this.showToast("⚠️ Connessione con l'avversario interrotta.");
+        this.showToast("⚠️ Connessione persa.");
       },
       onError: (err) => {
         this.resetOnlineLobbyUI();
@@ -430,15 +784,13 @@ class App {
     }
 
     this.net = new NetworkManager({
-      onConnect: () => {
-        this.showToast("Connesso con successo alla stanza!");
+      onConnect: (isHost, myId) => {
         this.gameMode = 'online';
         this.isHost = false;
-        this.resetOnlineLobbyUI();
-        this.onlineScreen.classList.add('hidden');
-        this.openDraft();
+        this.myPeerId = myId || 'guest';
+        this.showToast("Connesso! Sincronizzazione stanza...");
       },
-      onData: (data) => this.handleNetworkData(data),
+      onData: (data, peerId) => this.handleNetworkData(data, peerId),
       onDisconnect: () => {
         this.resetOnlineLobbyUI();
         this.showToast("⚠️ Connessione con l'Host interrotta.");
@@ -455,7 +807,11 @@ class App {
   }
 
   copyRoomLink() {
-    const url = this.roomShareUrl.innerText;
+    const url = this.roomShareUrl ? this.roomShareUrl.innerText : '';
+    if (!url || url.includes('Generazione')) {
+      this.showToast("Crea prima una stanza per ottenere il link!");
+      return;
+    }
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(url).then(() => {
         this.showToast("Link partita copiato negli appunti!");
@@ -467,10 +823,70 @@ class App {
     }
   }
 
-  handleNetworkData(data) {
+  handleNetworkData(data, peerId = 'guest') {
     if (!data || !data.type) return;
 
-    if (data.type === 'draft_sync') {
+    if (data.type === 'welcome') {
+      this.myPeerId = data.peerId || this.myPeerId;
+      if (data.controlMode) this.controlMode = data.controlMode;
+      if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
+      if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
+      if (data.seats) this.seats = data.seats;
+      this._syncMySeatFromSeats();
+      this._syncModePillsUI();
+      this.resetOnlineLobbyUI();
+      this.onlineScreen.classList.add('hidden');
+      if (data.matchActive) {
+        this.startMatch(false);
+        this.showToast("Sei entrato nella partita in corso!");
+      } else {
+        this.openDraft(false);
+      }
+    } else if (data.type === 'room_full') {
+      this.resetOnlineLobbyUI();
+      if (this.net) {
+        this.net.disconnect();
+        this.net = null;
+      }
+      this.showToast(`Stanza piena (${data.controlMode || ''} · max ${data.maxHumans || 2} giocatori).`);
+    } else if (data.type === 'lobby_state') {
+      if (data.controlMode) this.controlMode = data.controlMode;
+      if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
+      if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
+      if (data.seats) this.seats = data.seats;
+      this._syncMySeatFromSeats();
+      this._syncModePillsUI();
+      this.updateDraftSubtitle();
+      this.updateDraftSlots();
+      if (this.game && !this.game.isDestroyed && !this.isHost) {
+        this.game.controlMode = this.controlMode;
+        this.game.localTeam = this.localTeam;
+        this.game.localSlot = this.localSlot;
+        this.game.seats = this._cloneSeats();
+      }
+    } else if (data.type === 'claim_seat') {
+      if (this.isHost) {
+        const res = this._tryClaimSeat(peerId, data.team, data.slot);
+        if (!res.ok) {
+          this.net.sendTo(peerId, { type: 'seat_denied', reason: res.reason });
+          return;
+        }
+        this.updateDraftSlots();
+        this.updateOnlineBadges();
+        this.broadcastLobbyState();
+      }
+    } else if (data.type === 'seat_denied') {
+      this.showToast(data.reason || "Posto non disponibile!");
+    } else if (data.type === 'pick_char') {
+      if (this.isHost && getCharacterById(data.charId)) {
+        const seat = this._findSeatForPeer(peerId);
+        if (seat && this.controlMode !== '1v1') {
+          this._assignCharToTeamSlot(seat.team, seat.slot, data.charId);
+          this.updateDraftSlots();
+          this.broadcastLobbyState();
+        }
+      }
+    } else if (data.type === 'draft_sync') {
       if (Array.isArray(data.team1)) this.team1Picked = [...data.team1];
       if (Array.isArray(data.team2)) this.team2Picked = [...data.team2];
       this.updateDraftSlots();
@@ -481,24 +897,21 @@ class App {
         this.team2Picked = [...data.picks];
       }
       this.updateDraftSlots();
-    } else if (data.type === 'draft_update') {
-      if (Array.isArray(data.team1) && data.team1.length > 0) this.team1Picked = [...data.team1];
-      if (Array.isArray(data.team2) && data.team2.length > 0) this.team2Picked = [...data.team2];
-      this.updateDraftSlots();
-      if (data.readyToPlay) {
-        this.startMatch(false);
-      }
     } else if (data.type === 'client_start_request') {
       if (this.isHost) {
-        if (Array.isArray(data.team2) && data.team2.length === 3) {
+        if (this.controlMode === '1v1' && Array.isArray(data.team2) && data.team2.length === 3) {
           this.team2Picked = [...data.team2];
         }
         this.startMatch(true);
       }
     } else if (data.type === 'start_match') {
       if (!this.isHost) {
+        if (data.controlMode) this.controlMode = data.controlMode;
         if (Array.isArray(data.team1) && data.team1.length === 3) this.team1Picked = [...data.team1];
         if (Array.isArray(data.team2) && data.team2.length === 3) this.team2Picked = [...data.team2];
+        if (data.seats) this.seats = data.seats;
+        this._syncMySeatFromSeats();
+        this._syncModePillsUI();
         this.startMatch(false);
       }
     } else if (data.type === 'state') {
@@ -507,11 +920,11 @@ class App {
       }
     } else if (data.type === 'remote_input') {
       if (this.game && this.isHost) {
-        this.game.setRemoteInput(data.input);
+        this.game.setRemoteInput(data.input, peerId);
       }
     } else if (data.type === 'remote_action') {
       if (this.game && this.isHost) {
-        this.game.handleRemoteAction(data);
+        this.game.handleRemoteAction(data, peerId);
       }
     } else if (data.type === 'game_event') {
       if (this.game && !this.isHost) {
@@ -585,57 +998,150 @@ class App {
     });
   }
 
-  openDraft() {
+  openDraft(resetPicks = true) {
     this.menuScreen.classList.add('hidden');
     this.onlineScreen.classList.add('hidden');
     this.draftScreen.classList.remove('hidden');
 
     // Default pre-selections (entrambe le parti hanno una base valida fin da subito)
-    if (this.gameMode === 'cpu' || this.isHost) {
-      this.team1Picked = ['ento', 'lindi', 'bubi'];
-      this.team2Picked = ['pibe', 'matti', 'jelmo'];
-    } else {
-      if (this.team1Picked.length === 0) this.team1Picked = ['ento', 'lindi', 'bubi'];
-      if (this.team2Picked.length === 0) this.team2Picked = ['pibe', 'matti', 'jelmo'];
-    }
-
-    const subtitleEl = document.getElementById('draft-role-subtitle');
-    if (subtitleEl) {
-      if (this.gameMode === 'online') {
-        subtitleEl.innerText = this.isHost
-          ? 'SEI SQUADRA 1 (ROSSI — HOST)! Scegli i tuoi 3 giocatori e premi Scendi in Campo'
-          : 'SEI SQUADRA 2 (BLU — OSPITE)! Scegli i tuoi 3 giocatori e premi Scendi in Campo';
-      } else {
-        subtitleEl.innerText = 'Seleziona 3 compagni per la tua Squadra 1 e 3 avversari per la Squadra 2 (3 vs 3)';
+    if (resetPicks) {
+      if (this.gameMode === 'cpu' || this.isHost) {
+        this.team1Picked = ['ento', 'lindi', 'bubi'];
+        this.team2Picked = ['pibe', 'matti', 'jelmo'];
+        this.assignDefaultSeats(true);
       }
     }
+    if (this.team1Picked.length !== 3) this.team1Picked = ['ento', 'lindi', 'bubi'];
+    if (this.team2Picked.length !== 3) this.team2Picked = ['pibe', 'matti', 'jelmo'];
 
+    const draftRoomCtrl = document.getElementById('draft-room-controls');
+    if (draftRoomCtrl) {
+      draftRoomCtrl.classList.toggle('hidden', this.gameMode !== 'online');
+    }
+
+    this._syncModePillsUI();
+    this.updateDraftSubtitle();
     this.updateDraftSlots();
+  }
+
+  updateDraftSubtitle() {
+    const subtitleEl = document.getElementById('draft-role-subtitle');
+    if (!subtitleEl) return;
+
+    const roleMeta = SLOT_ROLES[this.localSlot] || SLOT_ROLES[2];
+    const teamLabel = (this.localTeam === 1) ? 'SQUADRA 1 (ROSSI)' : 'SQUADRA 2 (BLU)';
+
+    if (this.gameMode === 'online') {
+      if (this.controlMode === '1v1') {
+        subtitleEl.innerText = this.isHost
+          ? '1v1 · SEI SQUADRA 1 (ROSSI — HOST)! Scegli i tuoi 3 giocatori e premi Scendi in Campo'
+          : '1v1 · SEI SQUADRA 2 (BLU — OSPITE)! Scegli i tuoi 3 giocatori e premi Scendi in Campo';
+      } else {
+        subtitleEl.innerText = `${this.controlMode} · Sei ${teamLabel} (${roleMeta.icon} ${roleMeta.label}). Clicca un ruolo libero o scegli il tuo personaggio!`;
+      }
+    } else {
+      if (this.controlMode === '1v1') {
+        subtitleEl.innerText = '1v1 vs CPU · Scegli 3 giocatori per la Squadra 1 (comandi tutta la squadra)';
+      } else if (this.controlMode === '2v2') {
+        subtitleEl.innerText = `2v2 vs CPU · Comandi SOLO ${roleMeta.icon} ${roleMeta.label} fisso (Portiere = 🤖 CPU). Clicca DIF o ATT per cambiare ruolo!`;
+      } else {
+        subtitleEl.innerText = `3v3 vs CPU · Comandi SOLO ${roleMeta.icon} ${roleMeta.label} fisso (compagni = 🤖 CPU). Clicca POR, DIF o ATT per cambiare ruolo!`;
+      }
+    }
+  }
+
+  handleSlotClick(team, slot) {
+    if (this.controlMode === '1v1') {
+      if (this.gameMode === 'cpu' && team === 2) {
+        this.showToast("In 1v1 comandi tutta la Squadra 1 (Rossi).");
+      }
+      return;
+    }
+    if (this.controlMode === '2v2' && slot === 0) {
+      this.showToast("🧤 In 2v2 il Portiere è sempre controllato dalla CPU!");
+      return;
+    }
+
+    sounds.playBeep(700, 0.04);
+    if (this.gameMode === 'cpu') {
+      if (team !== 1) {
+        this.showToast("Contro la CPU scegli il tuo ruolo nella Squadra 1 (Rossi).");
+        return;
+      }
+      this.localTeam = 1;
+      this.localSlot = slot;
+      this.seats = { t1: [null, null, null], t2: [null, null, null], t2Peer: null };
+      this.seats.t1[slot] = 'local';
+      this.updateDraftSubtitle();
+      this.updateDraftSlots();
+      return;
+    }
+
+    if (this.isHost) {
+      const res = this._tryClaimSeat('host', team, slot);
+      if (!res.ok) {
+        this.showToast(res.reason);
+        return;
+      }
+      this.updateDraftSubtitle();
+      this.updateDraftSlots();
+      this.updateOnlineBadges();
+      this.broadcastLobbyState();
+    } else if (this.net && this.net.connected) {
+      this.net.send({ type: 'claim_seat', team, slot });
+    }
+  }
+
+  _assignCharToTeamSlot(team, slot, charId) {
+    const teamArray = (team === 1) ? this.team1Picked : this.team2Picked;
+    while (teamArray.length < 3) {
+      teamArray.push(CHARACTERS[teamArray.length].id);
+    }
+    const existingIdx = teamArray.indexOf(charId);
+    if (existingIdx !== -1 && existingIdx !== slot) {
+      teamArray[existingIdx] = teamArray[slot];
+    }
+    teamArray[slot] = charId;
   }
 
   handleCharacterClick(charId) {
     sounds.playBeep(650, 0.05);
 
-    // Online Client controlla Squadra 2; Host e CPU controllano Squadra 1
+    if (this.controlMode !== '1v1') {
+      this._assignCharToTeamSlot(this.localTeam, this.localSlot, charId);
+      this.updateDraftSlots();
+      if (this.gameMode === 'online' && this.net && this.net.connected) {
+        if (this.isHost) {
+          this.broadcastLobbyState();
+        } else {
+          this.net.send({
+            type: 'pick_char',
+            team: this.localTeam,
+            slot: this.localSlot,
+            charId
+          });
+        }
+      }
+      return;
+    }
+
+    // Modalità 1v1: Online Client controlla Squadra 2; Host e CPU controllano Squadra 1
     const targetTeam = (this.gameMode === 'online' && !this.isHost) ? 2 : 1;
     const teamArray = (targetTeam === 1) ? this.team1Picked : this.team2Picked;
 
     const existingIdx = teamArray.indexOf(charId);
     if (existingIdx !== -1) {
-      // Deseleziona
       teamArray.splice(existingIdx, 1);
     } else {
       if (teamArray.length < 3) {
         teamArray.push(charId);
       } else {
-        // Sostituisce l'ultimo
         teamArray[2] = charId;
       }
     }
 
     this.updateDraftSlots();
 
-    // Online: invia solo la squadra di competenza per evitare sovrascritture incrociate
     if (this.gameMode === 'online' && this.net && this.net.connected) {
       this.net.send({
         type: 'draft_team',
@@ -646,33 +1152,56 @@ class App {
   }
 
   updateDraftSlots() {
-    // Aggiorna slot Team 1
-    for (let i = 0; i < 3; i++) {
-      const slotEl = document.getElementById(`slot-t1-${i}`);
-      const id = this.team1Picked[i];
-      if (id) {
-        const char = getCharacterById(id);
-        slotEl.innerText = char.name;
-        slotEl.className = 'slot-item filled';
-      } else {
-        slotEl.innerText = `Giocatore ${i + 1}`;
-        slotEl.className = 'slot-item';
-      }
-    }
+    const renderTeamSlots = (teamNum, pickedArr, seatArr) => {
+      for (let i = 0; i < 3; i++) {
+        const slotEl = document.getElementById(`slot-t${teamNum}-${i}`);
+        if (!slotEl) continue;
 
-    // Aggiorna slot Team 2
-    for (let i = 0; i < 3; i++) {
-      const slotEl = document.getElementById(`slot-t2-${i}`);
-      const id = this.team2Picked[i];
-      if (id) {
-        const char = getCharacterById(id);
-        slotEl.innerText = char.name;
-        slotEl.className = 'slot-item filled';
-      } else {
-        slotEl.innerText = `Giocatore ${i + 1}`;
-        slotEl.className = 'slot-item';
+        const id = pickedArr[i];
+        const char = id ? getCharacterById(id) : null;
+        const roleMeta = SLOT_ROLES[i];
+        const charName = char ? char.name : `Giocatore ${i + 1}`;
+
+        if (this.controlMode === '1v1') {
+          const isMyTeam = (this.gameMode === 'cpu') ? (teamNum === 1) : ((this.isHost && teamNum === 1) || (!this.isHost && teamNum === 2));
+          const metaText = `${roleMeta.icon} ${roleMeta.label}${isMyTeam ? ' · TU' : (this.gameMode === 'cpu' ? ' · 🤖 CPU' : ' · 👤 AMICO')}`;
+          slotEl.innerHTML = `<span class="slot-char-name">${charName}</span><span class="slot-meta">${metaText}</span>`;
+          slotEl.className = `slot-item${char ? ' filled' : ''}${isMyTeam ? ' mine' : ''}`;
+          continue;
+        }
+
+        if (this.controlMode === '2v2' && i === 0) {
+          slotEl.innerHTML = `<span class="slot-char-name">${charName}</span><span class="slot-meta">🧤 POR · 🤖 CPU FISSA</span>`;
+          slotEl.className = 'slot-item filled cpu-locked';
+          continue;
+        }
+
+        const owner = Array.isArray(seatArr) ? seatArr[i] : null;
+        const isMine = (this.gameMode === 'cpu')
+          ? (teamNum === 1 && i === this.localSlot)
+          : Boolean(owner && owner === this.myPeerId);
+        const isOtherHuman = Boolean(owner) && !isMine;
+        const canClick = (this.gameMode === 'online') ? (!owner && !isMine) : (teamNum === 1 && i !== this.localSlot);
+
+        let metaText = `${roleMeta.icon} ${roleMeta.label}`;
+        if (isMine) metaText += ' · 👑 TU';
+        else if (isOtherHuman) metaText += ' · 👤 AMICO';
+        else if (canClick) metaText += ' · 🤖 CPU (clicca)';
+        else metaText += ' · 🤖 CPU';
+
+        const classes = ['slot-item'];
+        if (char) classes.push('filled');
+        if (isMine) classes.push('mine');
+        else if (isOtherHuman) classes.push('human-other');
+        if (canClick) classes.push('clickable');
+
+        slotEl.innerHTML = `<span class="slot-char-name">${charName}</span><span class="slot-meta">${metaText}</span>`;
+        slotEl.className = classes.join(' ');
       }
-    }
+    };
+
+    renderTeamSlots(1, this.team1Picked, this.seats ? this.seats.t1 : null);
+    renderTeamSlots(2, this.team2Picked, this.seats ? this.seats.t2 : null);
 
     // Aggiorna evidenziazione card
     CHARACTERS.forEach(char => {
@@ -720,8 +1249,10 @@ class App {
     if (notifyRemote && this.gameMode === 'online' && this.isHost && this.net && this.net.connected) {
       this.net.send({
         type: 'start_match',
+        controlMode: this.controlMode,
         team1: [...this.team1Picked],
-        team2: [...this.team2Picked]
+        team2: [...this.team2Picked],
+        seats: this._cloneSeats()
       });
     }
 
@@ -746,10 +1277,14 @@ class App {
     // Rimuovi canvas precedente se presente
     this.canvasContainer.innerHTML = '';
 
-    // Avvia Motore 2.5D
+    // Avvia Motore 2.5D con modalità di controllo (1v1 / 2v2 / 3v3) e seggi
     this.game = new FootballGame(this.canvasContainer, {
       team1: this.team1Picked,
       team2: this.team2Picked,
+      controlMode: this.controlMode,
+      localTeam: this.localTeam,
+      localSlot: this.localSlot,
+      seats: this._cloneSeats(),
       isSinglePlayer: (this.gameMode === 'cpu'),
       isHost: (this.gameMode === 'online' && this.isHost),
       isClient: (this.gameMode === 'online' && !this.isHost),
@@ -809,7 +1344,7 @@ class App {
     const specialEl = document.getElementById('cutin-special-name');
 
     if (avatarEl) {
-      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.0`;
+      avatarEl.src = charData.avatar || `assets/${charData.id}_avatar.png?v=3.1`;
     }
     if (nameEl) {
       nameEl.innerText = charData.name.toUpperCase();
@@ -929,8 +1464,9 @@ class App {
     const secs = (hudData.matchTime % 60).toString().padStart(2, '0');
     this.matchClockEl.innerText = `${mins}:${secs}`;
 
-    // Super Gauge HUD
-    const myTeamMeter = (this.gameMode === 'online' && !this.isHost) ? hudData.specialMeter2 : hudData.specialMeter1;
+    // Super Gauge HUD (segue la squadra effettiva dell'utente anche se co-op su Squadra 1)
+    const myTeam = hudData.localTeam || this.localTeam || 1;
+    const myTeamMeter = (myTeam === 2) ? hudData.specialMeter2 : hudData.specialMeter1;
     const specialFill = document.getElementById('special-fill');
     const specialVal = document.getElementById('special-val');
     const specialContainer = document.getElementById('special-meter-container');
@@ -949,13 +1485,28 @@ class App {
       touchSpecialBtn.classList.toggle('ready', myTeamMeter >= 100);
     }
 
+    // Nascondi Cambio Giocatore in 2v2 / 3v3 (giocatore fisso!)
+    const touchSwitchBtn = document.getElementById('touch-switch');
+    if (touchSwitchBtn) {
+      touchSwitchBtn.style.display = (hudData.controlMode && hudData.controlMode !== '1v1') ? 'none' : '';
+    }
+
     // Aggiorna etichette dinamiche pulsanti touch Mario Strikers
+    const isFixedMode = Boolean(hudData.controlMode && hudData.controlMode !== '1v1');
+    const iHaveBall = isFixedMode ? Boolean(hudData.iHaveBall) : Boolean(hudData.hasBall);
+
     const touchPassBtn = document.getElementById('touch-pass');
     if (touchPassBtn) {
       const icon = touchPassBtn.querySelector('.btn-icon');
       const label = touchPassBtn.querySelector('.btn-label');
       if (icon && label) {
-        if (hudData.hasBall) {
+        if (iHaveBall) {
+          icon.innerText = '👟';
+          label.innerText = 'PASSA';
+        } else if (isFixedMode && hudData.hasBall) {
+          icon.innerText = '📣';
+          label.innerText = 'CHIAMA';
+        } else if (isFixedMode) {
           icon.innerText = '👟';
           label.innerText = 'PASSA';
         } else {
@@ -970,9 +1521,12 @@ class App {
       const icon = touchShootBtn.querySelector('.btn-icon');
       const label = touchShootBtn.querySelector('.btn-label');
       if (icon && label) {
-        if (hudData.hasBall) {
+        if (iHaveBall) {
           icon.innerText = '⚽';
           label.innerText = 'TIRA';
+        } else if (hudData.localRole === 'gk') {
+          icon.innerText = '🧤';
+          label.innerText = 'TUFFO';
         } else {
           icon.innerText = '⚡';
           label.innerText = 'SCIVOLA';

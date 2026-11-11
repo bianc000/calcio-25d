@@ -1,6 +1,6 @@
 // Motore di Gioco 2.5D Calcio con Three.js
-import { CHARACTERS, getCharacterById } from './characters.js?v=3.0';
-import { sounds } from './audio.js?v=3.0';
+import { CHARACTERS, getCharacterById } from './characters.js?v=3.1';
+import { sounds } from './audio.js?v=3.1';
 
 export class FootballGame {
   constructor(canvasContainer, options = {}) {
@@ -21,6 +21,10 @@ export class FootballGame {
     this.goalCelebrationTimer = 0;
     this.isSinglePlayer = options.isSinglePlayer !== false;
     this.isPaused = false;
+    this.controlMode = options.controlMode || '1v1'; // '1v1', '2v2', '3v3'
+    this.localTeam = options.localTeam || (options.isClient ? 2 : 1);
+    this.localSlot = (typeof options.localSlot === 'number') ? options.localSlot : 2;
+    this.seats = options.seats || { t1: [null, null, null], t2: [null, null, null] };
 
     // Squadre (3 personaggi per squadra)
     this.team1Ids = options.team1 || ['ento', 'lindi', 'bubi'];
@@ -39,35 +43,11 @@ export class FootballGame {
     this.isKeyboardActive = false;
     this.lastScoringTeam = 1;
 
-    // Input locale
-    this.input = {
-      moveX: 0,
-      moveZ: 0,
-      sprint: false,
-      isChargingShot: false,
-      shotPower: 0,
-      shootTrigger: false,
-      shotBufferTimer: 0,
-      passTrigger: false,
-      passBufferTimer: 0,
-      slideTrigger: false,
-      switchTrigger: false
-    };
-
-    // Client remote input (se Host online)
-    this.remoteInput = {
-      moveX: 0,
-      moveZ: 0,
-      sprint: false,
-      isChargingShot: false,
-      shotPower: 0,
-      shootTrigger: false,
-      shotBufferTimer: 0,
-      passTrigger: false,
-      passBufferTimer: 0,
-      slideTrigger: false,
-      switchTrigger: false
-    };
+    // Input locale e mappa input per più peer remoti (Host multi-giocatore)
+    this.input = this._createInputState();
+    this.remoteInput = this._createInputState();
+    this.remoteInputs = new Map();
+    this.humanControlMask = 0;
 
     // Lifecycle & sync networking state
     this.rafId = null;
@@ -75,9 +55,9 @@ export class FootballGame {
     this._netSyncAccum = 0;
     this._snapNextState = false;
 
-    // Giocatore controllato attivamente (inizia controllando l'attaccante al centro 2 anziché il portiere 0)
-    this.activePlayerIdx1 = 2;
-    this.activePlayerIdx2 = 2;
+    // Giocatore controllato attivamente in 1v1 (in 2v2/3v3 ogni umano comanda 1 slot fisso)
+    this.activePlayerIdx1 = (this.controlMode !== '1v1' && this.localTeam === 1) ? this.localSlot : 2;
+    this.activePlayerIdx2 = (this.controlMode !== '1v1' && this.localTeam === 2) ? this.localSlot : 2;
 
     // Setup Three.js
     this.initThree();
@@ -537,7 +517,7 @@ export class FootballGame {
     // 2. VERO VOLTO FOTOGRAFICO IN-GAME (Stile Mario Strikers / Bobblehead)
     // Mostra la reale foto dell'amico sempre rivolta alla telecamera con grandissima definizione
     const loader = new window.THREE.TextureLoader();
-    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=3.0`;
+    const avatarPath = charData.avatar || `assets/${charData.id}_avatar.png?v=3.1`;
     const faceTex = loader.load(avatarPath);
     const faceMat = new window.THREE.SpriteMaterial({
       map: faceTex,
@@ -702,10 +682,106 @@ export class FootballGame {
     this.allPlayers = [...this.playersTeam1, ...this.playersTeam2];
   }
 
+  _createInputState() {
+    return {
+      moveX: 0,
+      moveZ: 0,
+      sprint: false,
+      isChargingShot: false,
+      shotPower: 0,
+      shootTrigger: false,
+      shotBufferTimer: 0,
+      passTrigger: false,
+      passBufferTimer: 0,
+      slideTrigger: false,
+      switchTrigger: false
+    };
+  }
+
+  _getSeatController(team, slot) {
+    if (this.controlMode === '1v1') {
+      if (team === 1) return (slot === this.activePlayerIdx1) ? 'host' : null;
+      if (this.isSinglePlayer) return null;
+      if (slot === this.activePlayerIdx2) return this.seats.t2Peer || 'guest';
+      return null;
+    }
+    if (this.controlMode === '2v2' && slot === 0) {
+      return null; // Portiere sempre CPU in 2v2
+    }
+    const list = (team === 1) ? this.seats.t1 : this.seats.t2;
+    return (Array.isArray(list) && list[slot]) ? list[slot] : null;
+  }
+
+  _findPeerSeat(peerId) {
+    if (this.controlMode === '1v1') {
+      return { team: 2, slot: this.activePlayerIdx2 };
+    }
+    for (let s = 0; s < 3; s++) {
+      if (this.controlMode === '2v2' && s === 0) continue;
+      if (this.seats.t1 && this.seats.t1[s] === peerId) return { team: 1, slot: s };
+      if (this.seats.t2 && this.seats.t2[s] === peerId) return { team: 2, slot: s };
+    }
+    return null;
+  }
+
+  _isSlotHumanControlled(team, slot) {
+    if (this.options.isClient) {
+      const bit = (team === 1 ? 0 : 3) + slot;
+      return (this.humanControlMask & (1 << bit)) !== 0;
+    }
+    return Boolean(this._getSeatController(team, slot));
+  }
+
+  _getLocalControlledPlayer() {
+    const arr = (this.localTeam === 1) ? this.playersTeam1 : this.playersTeam2;
+    const idx = (this.controlMode === '1v1')
+      ? (this.localTeam === 1 ? this.activePlayerIdx1 : this.activePlayerIdx2)
+      : this.localSlot;
+    return arr[idx] || arr[2] || arr[0];
+  }
+
+  _getPrimaryHumanOnTeam(team, refPlayer = null) {
+    const arr = (team === 1) ? this.playersTeam1 : this.playersTeam2;
+    if (this.controlMode === '1v1') {
+      if (team === 1) return arr[this.activePlayerIdx1];
+      return (!this.isSinglePlayer || this.options.isClient) ? arr[this.activePlayerIdx2] : null;
+    }
+    let best = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < arr.length; i++) {
+      if (!this._isSlotHumanControlled(team, i)) continue;
+      const candidate = arr[i];
+      if (!refPlayer) return candidate;
+      const d = Math.hypot(candidate.x - refPlayer.x, candidate.z - refPlayer.z);
+      if (d < bestDist) {
+        bestDist = d;
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  _requestCpuTeammatePass(team, requesterSlot) {
+    const holder = this.ball.holder;
+    if (!holder || holder.team !== team) return;
+    if (this._isSlotHumanControlled(team, holder.index)) return; // Non interrompere un compagno umano
+    const arr = (team === 1) ? this.playersTeam1 : this.playersTeam2;
+    const target = arr[requesterSlot];
+    if (target && !target.isExpelled && target !== holder) {
+      holder._forcedPassTarget = target;
+    }
+  }
+
   // Verifica se la squadra dell'utente ha il possesso del pallone
   userTeamHasBall() {
-    const userTeamNum = this.options.isClient ? 2 : 1;
-    return (this.ball.holder && this.ball.holder.team === userTeamNum);
+    return Boolean(this.ball.holder && this.ball.holder.team === this.localTeam);
+  }
+
+  // In 1v1 vale il possesso squadra; in 2v2/3v3 vale il possesso personale del giocatore bloccato
+  localPlayerHasBall() {
+    if (this.controlMode === '1v1') return this.userTeamHasBall();
+    const me = this._getLocalControlledPlayer();
+    return Boolean(me && this.ball.holder === me);
   }
 
   emitClientAction(actionPayload) {
@@ -715,6 +791,16 @@ export class FootballGame {
   }
 
   triggerInputPass() {
+    if (this.controlMode !== '1v1' && !this.localPlayerHasBall()) {
+      if (this.userTeamHasBall()) {
+        if (this.options.isClient) {
+          this.emitClientAction({ action: 'call_pass' });
+        } else {
+          this._requestCpuTeammatePass(this.localTeam, this.localSlot);
+        }
+      }
+      return;
+    }
     if (this.options.isClient) {
       this.emitClientAction({ action: 'pass' });
       return;
@@ -724,6 +810,10 @@ export class FootballGame {
   }
 
   triggerInputSwitch() {
+    if (this.controlMode !== '1v1') {
+      // In 2v2 / 3v3 il giocatore resta fisso sul proprio ruolo
+      return;
+    }
     if (this.options.isClient) {
       this.emitClientAction({ action: 'switch' });
       return;
@@ -740,7 +830,7 @@ export class FootballGame {
   }
 
   startInputShotCharge() {
-    if (this.userTeamHasBall()) {
+    if (this.localPlayerHasBall()) {
       this.input.isChargingShot = true;
       this.input.shotPower = Math.max(this.input.shotPower, 0.45);
       if (this.options.isClient) {
@@ -769,7 +859,8 @@ export class FootballGame {
       this.emitClientAction({ action: 'special' });
       return;
     }
-    this.triggerSpecial(1);
+    const overrideIdx = (this.controlMode === '1v1') ? null : this.localSlot;
+    this.triggerSpecial(this.localTeam, overrideIdx);
   }
 
   setupEventListeners() {
@@ -916,43 +1007,77 @@ export class FootballGame {
     }
   }
 
-  // Riceve movimento continuo dal giocatore remoto (Host online)
-  setRemoteInput(inputData) {
-    if (!inputData) return;
-    if (typeof inputData.moveX === 'number') this.remoteInput.moveX = inputData.moveX;
-    if (typeof inputData.moveZ === 'number') this.remoteInput.moveZ = inputData.moveZ;
-    if (typeof inputData.sprint === 'boolean') this.remoteInput.sprint = inputData.sprint;
+  _getRemoteInputState(peerId = 'guest') {
+    if (this.controlMode === '1v1' || peerId === 'guest') return this.remoteInput;
+    if (!this.remoteInputs.has(peerId)) {
+      this.remoteInputs.set(peerId, this._createInputState());
+    }
+    return this.remoteInputs.get(peerId);
   }
 
-  // Riceve azioni discrete istantanee dal Client (Host online)
-  handleRemoteAction(data) {
+  releasePeer(peerId) {
+    if (!peerId) return;
+    this.remoteInputs.delete(peerId);
+    if (this.seats.t2Peer === peerId) this.seats.t2Peer = null;
+    ['t1', 't2'].forEach(key => {
+      if (Array.isArray(this.seats[key])) {
+        this.seats[key] = this.seats[key].map(v => (v === peerId ? null : v));
+      }
+    });
+  }
+
+  // Riceve movimento continuo dal giocatore remoto (Host multi-peer)
+  setRemoteInput(inputData, peerId = 'guest') {
+    if (!inputData) return;
+    const target = (this.controlMode === '1v1')
+      ? this.remoteInput
+      : this._getRemoteInputState(peerId);
+    if (typeof inputData.moveX === 'number') target.moveX = inputData.moveX;
+    if (typeof inputData.moveZ === 'number') target.moveZ = inputData.moveZ;
+    if (typeof inputData.sprint === 'boolean') target.sprint = inputData.sprint;
+  }
+
+  // Riceve azioni discrete istantanee dai Client (Host multi-peer)
+  handleRemoteAction(data, peerId = 'guest') {
     if (!data || !this.options.isHost) return;
+    const seat = this._findPeerSeat(peerId);
+    if (!seat) return;
+    const inp = (this.controlMode === '1v1')
+      ? this.remoteInput
+      : this._getRemoteInputState(peerId);
+
     switch (data.action) {
       case 'pass':
-        this.remoteInput.passTrigger = true;
-        this.remoteInput.passBufferTimer = 0.5;
+        inp.passTrigger = true;
+        inp.passBufferTimer = 0.5;
+        break;
+      case 'call_pass':
+        if (this.state === 'playing') {
+          this._requestCpuTeammatePass(seat.team, seat.slot);
+        }
         break;
       case 'switch':
-        if (this.state === 'playing') {
-          this.switchActivePlayer(2);
+        if (this.controlMode === '1v1' && this.state === 'playing') {
+          this.switchActivePlayer(seat.team);
         }
         break;
       case 'slide':
-        this.remoteInput.slideTrigger = true;
+        inp.slideTrigger = true;
         break;
       case 'charge_start':
-        this.remoteInput.isChargingShot = true;
-        this.remoteInput.shotPower = Math.max(this.remoteInput.shotPower || 0, Number(data.shotPower) || 0.45);
+        inp.isChargingShot = true;
+        inp.shotPower = Math.max(inp.shotPower || 0, Number(data.shotPower) || 0.45);
         break;
       case 'shoot':
-        this.remoteInput.isChargingShot = false;
-        this.remoteInput.shotPower = Math.max(0.45, Math.min(1.0, Number(data.shotPower) || 0.55));
-        this.remoteInput.shootTrigger = true;
-        this.remoteInput.shotBufferTimer = 0.5;
+        inp.isChargingShot = false;
+        inp.shotPower = Math.max(0.45, Math.min(1.0, Number(data.shotPower) || 0.55));
+        inp.shootTrigger = true;
+        inp.shotBufferTimer = 0.5;
         break;
       case 'special':
         if (this.state === 'playing') {
-          this.triggerSpecial(2);
+          const overrideIdx = (this.controlMode === '1v1') ? null : seat.slot;
+          this.triggerSpecial(seat.team, overrideIdx);
         }
         break;
     }
@@ -998,7 +1123,7 @@ export class FootballGame {
       p.mesh.position.set(p.x, 0, p.z);
     });
 
-    // Chi batte riceve la palla vicino e viene selezionato come giocatore attivo!
+    // Chi batte riceve la palla vicino e viene selezionato come giocatore attivo (in 1v1)
     if (concedingTeam === 1) {
       // Batte Team 1
       const striker = this.playersTeam1[2];
@@ -1010,7 +1135,7 @@ export class FootballGame {
       this.ball.holder = striker;
       this.ball.x = -0.3;
       this.ball.z = 0;
-      this.activePlayerIdx1 = 2; // Controllo immediato sull'attaccante che batte al centro!
+      if (this.controlMode === '1v1') this.activePlayerIdx1 = 2; // Controllo immediato sull'attaccante che batte al centro!
     } else {
       // Batte Team 2
       const striker = this.playersTeam2[2];
@@ -1022,7 +1147,7 @@ export class FootballGame {
       this.ball.holder = striker;
       this.ball.x = 0.3;
       this.ball.z = 0;
-      this.activePlayerIdx2 = 2; // Controllo immediato sull'attaccante che batte al centro!
+      if (this.controlMode === '1v1') this.activePlayerIdx2 = 2; // Controllo immediato sull'attaccante che batte al centro!
     }
 
     this.ballMesh.position.set(this.ball.x, this.ball.y, this.ball.z);
@@ -1043,8 +1168,9 @@ export class FootballGame {
     this.isPaused = paused;
   }
 
-  // Switch al compagno più vicino alla palla (escludendo il giocatore già attivo e quelli espulsi)
+  // Switch al compagno più vicino alla palla (solo in 1v1, escludendo il giocatore già attivo e quelli espulsi)
   switchActivePlayer(teamNum) {
+    if (this.controlMode !== '1v1') return;
     const team = (teamNum === 1) ? this.playersTeam1 : this.playersTeam2;
     const currentIdx = (teamNum === 1) ? this.activePlayerIdx1 : this.activePlayerIdx2;
     let closestIdx = -1;
@@ -1101,6 +1227,7 @@ export class FootballGame {
     this._tickInputBuffers(this.input, dt);
     if (this.options.isHost && !this.isSinglePlayer) {
       this._tickInputBuffers(this.remoteInput, dt);
+      this.remoteInputs.forEach(inp => this._tickInputBuffers(inp, dt));
     }
   }
 
@@ -1121,6 +1248,7 @@ export class FootballGame {
   }
 
   _autoSwitchToPlayer(team, idx) {
+    if (this.controlMode !== '1v1') return;
     if (team === 1 && !this.options.isClient) {
       this.activePlayerIdx1 = idx;
     } else if (team === 2 && (this.options.isClient || !this.isSinglePlayer)) {
@@ -1214,8 +1342,7 @@ export class FootballGame {
     }
 
     const stats = p.charData;
-    const isHuman = (p.team === 1 && !this.options.isClient && p.index === this.activePlayerIdx1) ||
-                    (p.team === 2 && (this.options.isClient || !this.isSinglePlayer) && p.index === this.activePlayerIdx2);
+    const isHuman = this._isSlotHumanControlled(p.team, p.index);
 
     if (p.protectionTimer > 0) p.protectionTimer -= dt;
     if (p.tackleCooldown > 0) p.tackleCooldown -= dt;
@@ -1264,8 +1391,35 @@ export class FootballGame {
       return;
     }
 
-    // Trigger contrasto: Spallata fisica (Mario Strikers Body Check) da vicino o Scivolata in corsa
+    // Trigger contrasto: Tuffo del Portiere Umano, Spallata fisica da vicino o Scivolata in corsa
     if (inputData.slideTrigger && !p.isSliding) {
+      const distToBallNow = Math.hypot(this.ball.x - p.x, this.ball.z - p.z);
+      if (isHuman && p.role === 'gk' && !this.ball.holder && distToBallNow < 4.2 * p.scale) {
+        sounds.playGloveSave();
+        this.addCameraShake(0.5);
+        p.isSliding = true;
+        p.slideTimer = 0.42;
+        const dx = this.ball.x - p.x;
+        const dz = this.ball.z - p.z;
+        const d = Math.hypot(dx, dz) || 1;
+        const diveSpeed = currentMaxSpeed * 1.65;
+        p.vx = (dx / d) * diveSpeed;
+        p.vz = (dz / d) * diveSpeed;
+        p.rot = Math.atan2(dx, dz);
+
+        const movingToOwnGoal = (p.team === 1) ? (this.ball.vx < -14) : (this.ball.vx > 14);
+        if (distToBallNow < 2.6 * p.scale && movingToOwnGoal) {
+          const outDir = (p.team === 1) ? 1 : -1;
+          this.ball.vx = outDir * 14;
+          this.ball.vz = Math.sign(this.ball.z - p.z || 1) * 9 + (Math.random() - 0.5) * 5;
+          this.ball.vy = 2.6;
+          this.ball.isSpecialShot = false;
+          p.cannotPickupTimer = 0.3;
+        }
+        inputData.slideTrigger = false;
+        return;
+      }
+
       const enemyCarrier = (this.ball.holder && this.ball.holder.team !== p.team) ? this.ball.holder : null;
       const distToCarrier = enemyCarrier ? Math.hypot(p.x - enemyCarrier.x, p.z - enemyCarrier.z) : 999;
 
@@ -1478,21 +1632,26 @@ export class FootballGame {
         const teammates = (p.team === 1) ? this.playersTeam1 : this.playersTeam2;
         const otherTeammates = teammates.filter(mate => mate !== p && !mate.isExpelled);
 
-        // Trova compagno migliore da servire (escludendo compagni espulsi)
+        // Trova compagno migliore da servire (rispettando chiamata passaggio in 2v2/3v3 ed escludendo espulsi)
         let bestTarget = otherTeammates[0] || teammates[0];
-        let bestScore = -9999;
+        if (p._forcedPassTarget && !p._forcedPassTarget.isExpelled && p._forcedPassTarget !== p) {
+          bestTarget = p._forcedPassTarget;
+        } else {
+          let bestScore = -9999;
 
-        otherTeammates.forEach(mate => {
-          const dx = mate.x - p.x;
-          const dz = mate.z - p.z;
-          const dist = Math.hypot(dx, dz);
-          const forwardBonus = (p.team === 1) ? (mate.x - p.x) * 1.5 : (p.x - mate.x) * 1.5;
-          const score = forwardBonus - dist * 0.4;
-          if (score > bestScore) {
-            bestScore = score;
-            bestTarget = mate;
-          }
-        });
+          otherTeammates.forEach(mate => {
+            const dx = mate.x - p.x;
+            const dz = mate.z - p.z;
+            const dist = Math.hypot(dx, dz);
+            const forwardBonus = (p.team === 1) ? (mate.x - p.x) * 1.5 : (p.x - mate.x) * 1.5;
+            const score = forwardBonus - dist * 0.4;
+            if (score > bestScore) {
+              bestScore = score;
+              bestTarget = mate;
+            }
+          });
+        }
+        p._forcedPassTarget = null;
 
         const dx = bestTarget.x - p.x;
         const dz = bestTarget.z - p.z;
@@ -1589,9 +1748,12 @@ export class FootballGame {
         inputData.isChargingShot = false;
       }
 
-      // Controlla intercetto / aggancio palla vagante
-      const pickupRadius = (isHuman ? 1.6 : 1.25) * p.scale;
-      if (distToBall < pickupRadius && this.ball.y < 2.0 && !this.ball.holder && (!p.cannotPickupTimer || p.cannotPickupTimer <= 0)) {
+      // Controlla intercetto / aggancio palla vagante (portiere umano ha raggio di presa maggiore)
+      const isHumanGK = (isHuman && p.role === 'gk');
+      const pickupRadius = (isHumanGK ? 2.35 : (isHuman ? 1.6 : 1.25)) * p.scale;
+      const maxPickupY = isHumanGK ? 3.2 : 2.0;
+      if (distToBall < pickupRadius && this.ball.y < maxPickupY && !this.ball.holder && (!p.cannotPickupTimer || p.cannotPickupTimer <= 0)) {
+        p._forcedPassTarget = null;
         this.ball.holder = p;
         this.ball.lastPossessor = p;
         this.ball.isSpecialShot = false;
@@ -1629,10 +1791,8 @@ export class FootballGame {
     const targetGoalX = (p.team === 1) ? this.FIELD_W / 2 : -this.FIELD_W / 2;
     const ownGoalX = (p.team === 1) ? -this.FIELD_W / 2 : this.FIELD_W / 2;
 
-    const isUserTeam = (p.team === 1) ? !this.options.isClient : (!this.isSinglePlayer || this.options.isClient);
-    const activeMyIdx = (p.team === 1) ? this.activePlayerIdx1 : this.activePlayerIdx2;
-    const activeOppIdx = (p.team === 1) ? this.activePlayerIdx2 : this.activePlayerIdx1;
-    const humanPlayer = isUserTeam ? myTeam[activeMyIdx] : oppTeam[activeOppIdx];
+    const humanPlayer = this._getPrimaryHumanOnTeam(p.team, p);
+    const isUserTeam = Boolean(humanPlayer);
 
     const distToBall = Math.hypot(p.x - this.ball.x, p.z - this.ball.z);
     const hasBall = (this.ball.holder === p);
@@ -1641,25 +1801,42 @@ export class FootballGame {
     // 1. IL GIOCATORE AI HA LA PALLA
     // ============================================
     if (hasBall) {
-      if (isUserTeam) {
-        // Compagno di squadra dell'utente ha la palla: cerca passaggio all'utente o avanza
-        const distToHuman = Math.hypot(p.x - humanPlayer.x, p.z - humanPlayer.z);
-        if (p !== humanPlayer && distToHuman < 26 && Math.random() < 0.04) {
+      if (p._forcedPassTarget && !p._forcedPassTarget.isExpelled && p.possessionTime > 0.08) {
+        aiInput.passTrigger = true;
+      } else if (p.role === 'gk') {
+        // Portiere CPU distribuisce subito la palla ai compagni di squadra
+        const dx = targetGoalX - p.x;
+        const dz = -p.z * 0.4;
+        const len = Math.hypot(dx, dz) || 1;
+        aiInput.moveX = dx / len;
+        aiInput.moveZ = dz / len;
+        if (p.possessionTime > 0.45) {
+          aiInput.passTrigger = true;
+        }
+      } else if (isUserTeam) {
+        // Compagno di squadra dell'utente ha la palla: cerca passaggio all'utente, avanza o tira vicino alla porta
+        const distToHuman = humanPlayer ? Math.hypot(p.x - humanPlayer.x, p.z - humanPlayer.z) : 999;
+        const distToGoal = Math.abs(targetGoalX - p.x);
+        if (distToGoal < 13 && Math.abs(p.z) < 8 && p.possessionTime > 0.7 && Math.random() < 0.06) {
+          aiInput.shootTrigger = true;
+          aiInput.shotPower = 0.65;
+        } else if (humanPlayer && p !== humanPlayer && distToHuman < 26 && p.possessionTime > 0.45 && Math.random() < 0.045) {
           aiInput.passTrigger = true;
         } else {
           const dx = targetGoalX - p.x;
           const dz = -p.z * 0.35;
-          const len = Math.hypot(dx, dz);
+          const len = Math.hypot(dx, dz) || 1;
           aiInput.moveX = dx / len;
           aiInput.moveZ = dz / len;
         }
       } else {
         // CPU avversaria ha la palla: avanza a passo controllato (senza sprintare)
         const distToGoal = Math.abs(targetGoalX - p.x);
+        const oppMeter = (p.team === 1) ? this.specialMeter1 : this.specialMeter2;
 
         // Tira SOLO se molto vicina alla porta (< 15 metri) e centrale, dopo aver controllato la palla
-        if (this.isSinglePlayer && this.specialMeter2 >= 100 && distToGoal < 28 && p.possessionTime > 0.6 && Math.random() < 0.05) {
-          this.triggerSpecial(2);
+        if (oppMeter >= 100 && distToGoal < 28 && p.possessionTime > 0.6 && Math.random() < 0.05) {
+          this.triggerSpecial(p.team, p.index);
         } else if (distToGoal < 15 && Math.abs(p.z) < 9 && p.possessionTime > 0.8) {
           aiInput.shootTrigger = true;
           aiInput.shotPower = 0.55 + Math.random() * 0.25;
@@ -1667,7 +1844,7 @@ export class FootballGame {
           // Avanza verso la porta a passo moderato
           const dirX = targetGoalX - p.x;
           const dirZ = -p.z * 0.3;
-          const len = Math.hypot(dirX, dirZ);
+          const len = Math.hypot(dirX, dirZ) || 1;
           aiInput.moveX = dirX / len;
           aiInput.moveZ = dirZ / len;
           aiInput.sprint = false; // Non scatta: l'utente può raggiungerla e toglierle palla!
@@ -1683,9 +1860,9 @@ export class FootballGame {
     // 2. NESSUNO HA LA PALLA (PALLA VAGANTE)
     // ============================================
     else if (!this.ball.holder) {
-      const humanDistToBall = Math.hypot(humanPlayer.x - this.ball.x, humanPlayer.z - this.ball.z);
+      const humanDistToBall = humanPlayer ? Math.hypot(humanPlayer.x - this.ball.x, humanPlayer.z - this.ball.z) : 999;
 
-      if (isUserTeam && (this.isSinglePlayer || p.role !== 'gk')) {
+      if (p.role !== 'gk' && isUserTeam && humanPlayer) {
         // Compagno di squadra dell'utente:
         // Se l'utente è vicino alla palla (< 8m), si smarca per ricevere; altrimenti va a recuperarla
         if (humanDistToBall < 8 && p !== humanPlayer) {
@@ -1779,12 +1956,14 @@ export class FootballGame {
             }
           }
         } else {
-          // Trova il giocatore CPU di movimento più vicino alla palla
-          let closestCpu = myTeam[0];
+          // Trova il giocatore CPU di movimento più vicino alla palla (escludendo portiere, espulsi e giocatori umani)
+          let closestCpu = null;
           let minCpuDist = 9999;
           myTeam.forEach(cp => {
-            const d = Math.hypot(cp.x - this.ball.x, cp.z - this.ball.z);
-            if (d < minCpuDist) { minCpuDist = d; closestCpu = cp; }
+            if (cp.role !== 'gk' && !cp.isExpelled && !this._isSlotHumanControlled(p.team, cp.index)) {
+              const d = Math.hypot(cp.x - this.ball.x, cp.z - this.ball.z);
+              if (d < minCpuDist) { minCpuDist = d; closestCpu = cp; }
+            }
           });
 
           if (p === closestCpu) {
@@ -1830,6 +2009,17 @@ export class FootballGame {
             aiInput.moveX = dx / len;
             aiInput.moveZ = dz / len;
           }
+        } else if (holder.team === p.team) {
+          // Un compagno ha la palla: smarcati in avanti lungo la propria fascia
+          const targetX = Math.max(-this.FIELD_W / 2 + 6, Math.min(this.FIELD_W / 2 - 6, holder.x + (p.team === 1 ? 11 : -11)));
+          const targetZ = p.baseZ * 0.85;
+          const dx = targetX - p.x;
+          const dz = targetZ - p.z;
+          const len = Math.hypot(dx, dz);
+          if (len > 1.2) {
+            aiInput.moveX = dx / len;
+            aiInput.moveZ = dz / len;
+          }
         } else {
           // Copertura e pressing se l'avversario è vicino
           const distToHolder = Math.hypot(p.x - holder.x, p.z - holder.z);
@@ -1856,10 +2046,10 @@ export class FootballGame {
       } else {
         // CPU DIFENDE CONTRO L'UTENTE (Equilibrata, contrasta e ruba palla senza essere scorretta):
         // 1. Trova il difensore CPU di movimento più vicino al portatore
-        let closestDefender = myTeam[0];
+        let closestDefender = null;
         let minDefDist = 9999;
         myTeam.forEach(cp => {
-          if (cp.role !== 'gk') {
+          if (cp.role !== 'gk' && !cp.isExpelled && !this._isSlotHumanControlled(p.team, cp.index)) {
             const d = Math.hypot(cp.x - holder.x, cp.z - holder.z);
             if (d < minDefDist) { minDefDist = d; closestDefender = cp; }
           }
@@ -1937,7 +2127,7 @@ export class FootballGame {
   }
 
   // Scatena la Super Abilità Mario Strikers
-  triggerSpecial(teamNum) {
+  triggerSpecial(teamNum, overridePlayerIdx = null) {
     if (this.state !== 'playing') return false;
     const meter = (teamNum === 1) ? this.specialMeter1 : this.specialMeter2;
     if (meter < 100) {
@@ -1955,7 +2145,11 @@ export class FootballGame {
     }
 
     const activeIdx = (teamNum === 1) ? this.activePlayerIdx1 : this.activePlayerIdx2;
-    const player = (teamNum === 1) ? this.playersTeam1[activeIdx] : this.playersTeam2[activeIdx];
+    const teamArr = (teamNum === 1) ? this.playersTeam1 : this.playersTeam2;
+    const playerIdx = (typeof overridePlayerIdx === 'number' && teamArr[overridePlayerIdx] && !teamArr[overridePlayerIdx].isExpelled)
+      ? overridePlayerIdx
+      : activeIdx;
+    const player = teamArr[playerIdx] || teamArr[2] || teamArr[0];
     const char = player.charData;
 
     // Cut-in Cinematic Mario Strikers
@@ -1965,7 +2159,7 @@ export class FootballGame {
     this.emitGameEvent({
       event: 'special',
       team: teamNum,
-      playerIndex: activeIdx,
+      playerIndex: playerIdx,
       charId: char.id,
       playerName: player.name,
       charName: char.name,
@@ -2543,22 +2737,26 @@ export class FootballGame {
           if (this.options.onMatchEnd) this.options.onMatchEnd(this.score);
         }
 
-        // Aggiorna Squadra 1
+        // Aggiorna Squadra 1 (Host / Locale o Peer remoto o AI)
         this.playersTeam1.forEach((p, idx) => {
-          if (idx === this.activePlayerIdx1) {
+          const ctrl = this._getSeatController(1, idx);
+          if (ctrl === 'local' || ctrl === 'host') {
             this.updatePlayer(p, this.input, dt);
+          } else if (ctrl) {
+            this.updatePlayer(p, this._getRemoteInputState(ctrl), dt);
           } else {
             this.updateAI(p, dt);
           }
         });
 
-        // Aggiorna Squadra 2
+        // Aggiorna Squadra 2 (Host / Peer remoto / Multi-Peer o AI)
         this.playersTeam2.forEach((p, idx) => {
-          if (!this.isSinglePlayer && idx === this.activePlayerIdx2) {
-            // Online Host: riceve input remoto per P2
-            this.updatePlayer(p, this.remoteInput, dt);
+          const ctrl = this._getSeatController(2, idx);
+          if (ctrl === 'local' || ctrl === 'host') {
+            this.updatePlayer(p, this.input, dt);
+          } else if (ctrl) {
+            this.updatePlayer(p, this._getRemoteInputState(ctrl), dt);
           } else {
-            // AI per compagni o CPU
             this.updateAI(p, dt);
           }
         });
@@ -2566,13 +2764,18 @@ export class FootballGame {
         // Aggiorna fisica palla
         this.updateBall(dt);
 
-        // Reset triggers input
+        // Reset triggers input (locale + tutti i peer remoti)
         this.input.shootTrigger = false;
         this.input.passTrigger = false;
         this.input.slideTrigger = false;
         this.remoteInput.shootTrigger = false;
         this.remoteInput.passTrigger = false;
         this.remoteInput.slideTrigger = false;
+        this.remoteInputs.forEach(inp => {
+          inp.shootTrigger = false;
+          inp.passTrigger = false;
+          inp.slideTrigger = false;
+        });
 
       } else if (this.state === 'goal') {
         // Celebrazione del gol
@@ -2599,40 +2802,64 @@ export class FootballGame {
       this.updateClientVisuals(dt);
     }
 
-    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (proporzionati ed eleganti)
-    const activeIdx1 = this.activePlayerIdx1;
-    this.playersTeam1.forEach((p, idx) => {
-      const isActive = (idx === activeIdx1);
-      p.ringMat.opacity = isActive ? 0.9 : 0;
-      p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
-      if (p.nameTag) {
-        const sX = (isActive ? 3.5 : 2.7) * p.scale;
-        const sY = (isActive ? 0.88 : 0.68) * p.scale;
-        p.nameTag.scale.set(sX, sY, 1);
-        p.nameTag.position.y = 3.85 * p.scale;
-      }
-    });
+    // 3. Indicatori visivi di selezione e cartellini nomi 3D sopra la testa (Oro = Tu, Ciano/Corallo = Altri Umani)
+    const renderTeamIndicators = (arr, teamNum, activeIdx) => {
+      arr.forEach((p, idx) => {
+        const isMine = (this.localTeam === teamNum) &&
+          ((this.controlMode === '1v1') ? (idx === activeIdx) : (idx === this.localSlot));
+        const isHuman = (this.controlMode === '1v1')
+          ? ((idx === activeIdx) && (teamNum === 1 || !this.isSinglePlayer))
+          : this._isSlotHumanControlled(teamNum, idx);
+        const isOtherHuman = !isMine && isHuman;
 
-    const activeIdx2 = this.activePlayerIdx2;
-    this.playersTeam2.forEach((p, idx) => {
-      const isActive = (idx === activeIdx2);
-      p.ringMat.opacity = isActive ? 0.9 : 0;
-      p.arrowMat.opacity = (isActive && this.ball.holder === p) ? 0.9 : 0;
-      if (p.nameTag) {
-        const sX = (isActive ? 3.5 : 2.7) * p.scale;
-        const sY = (isActive ? 0.88 : 0.68) * p.scale;
-        p.nameTag.scale.set(sX, sY, 1);
-        p.nameTag.position.y = 3.85 * p.scale;
-      }
-    });
+        if (p.ringMat) {
+          if (isMine) {
+            p.ringMat.color.setHex(0xffd700);
+            p.ringMat.opacity = 0.95;
+          } else if (isOtherHuman) {
+            p.ringMat.color.setHex(teamNum === this.localTeam ? 0x00f0ff : 0xff6b6b);
+            p.ringMat.opacity = 0.55;
+          } else {
+            p.ringMat.opacity = 0;
+          }
+        }
+        if (p.arrowMat) {
+          p.arrowMat.opacity = (isMine && this.ball.holder === p)
+            ? 0.95
+            : ((isOtherHuman && this.ball.holder === p) ? 0.55 : 0);
+        }
+        if (p.nameTag) {
+          const sX = (isMine ? 3.5 : (isOtherHuman ? 3.1 : 2.7)) * p.scale;
+          const sY = (isMine ? 0.88 : (isOtherHuman ? 0.78 : 0.68)) * p.scale;
+          p.nameTag.scale.set(sX, sY, 1);
+          p.nameTag.position.y = 3.85 * p.scale;
+        }
+      });
+    };
 
-    // 4. Telecamera dinamica 2.5D Mario Strikers (insegue la palla con visuale ravvicinata e adrenalinica)
-    const targetCamX = this.ball.x * 0.45;
-    const targetCamZ = this.ball.z * 0.38 + 38;
+    renderTeamIndicators(this.playersTeam1, 1, this.activePlayerIdx1);
+    renderTeamIndicators(this.playersTeam2, 2, this.activePlayerIdx2);
+
+    // 4. Telecamera dinamica 2.5D Mario Strikers (insegue palla + orientamento verso giocatore fisso in 2v2/3v3)
+    let focusX = this.ball.x * 0.45;
+    let focusZ = this.ball.z * 0.38;
+    let camHeight = 38;
+    let camZOffset = 38;
+    if (this.controlMode !== '1v1') {
+      const localP = this._getLocalControlledPlayer();
+      if (localP) {
+        focusX = this.ball.x * 0.34 + localP.x * 0.14;
+        focusZ = this.ball.z * 0.28 + localP.z * 0.12;
+        camHeight = 41.5;
+        camZOffset = 41;
+      }
+    }
+    const targetCamX = focusX;
+    const targetCamZ = focusZ + camZOffset;
     this.camera.position.x += (targetCamX - this.camera.position.x) * 3.5 * dt;
-    this.camera.position.y += (38 - this.camera.position.y) * 2.5 * dt;
+    this.camera.position.y += (camHeight - this.camera.position.y) * 2.5 * dt;
     this.camera.position.z += (targetCamZ - this.camera.position.z) * 3.5 * dt;
-    this.camera.lookAt(this.ball.x * 0.45, 1.2, this.ball.z * 0.35);
+    this.camera.lookAt(focusX, 1.2, focusZ * 0.92);
 
     // Applicazione Camera Shake per impatto arcade
     if (this.cameraShake > 0.01) {
@@ -2650,11 +2877,16 @@ export class FootballGame {
 
     // Callback per aggiornamento HUD (Scoreboard, Timer, Minimappa, Super Gauge)
     if (this.options.onUpdateHUD) {
+      const localP = this._getLocalControlledPlayer();
       this.options.onUpdateHUD({
         score: this.score,
         matchTime: Math.ceil(this.matchTime),
         ball: { x: this.ball.x, z: this.ball.z },
         hasBall: this.userTeamHasBall(),
+        iHaveBall: this.localPlayerHasBall(),
+        localRole: localP ? localP.role : 'fwd',
+        controlMode: this.controlMode,
+        localTeam: this.localTeam,
         p1: this.playersTeam1.map(p => ({ x: p.x, z: p.z, id: p.id, name: p.name })),
         p2: this.playersTeam2.map(p => ({ x: p.x, z: p.z, id: p.id, name: p.name })),
         shotPower: this.input.shotPower,
@@ -2665,7 +2897,7 @@ export class FootballGame {
       });
     }
 
-    // Se Host online, serializza e invia stato al peer a 30Hz (volatile)
+    // Se Host online, serializza e invia stato ai peer a 30Hz (volatile)
     if (this.options.isHost && this.options.networkManager && this.options.networkManager.connected) {
       this._netSyncAccum += dt;
       if (this._netSyncAccum >= 0.033) {
@@ -2675,12 +2907,22 @@ export class FootballGame {
     }
   }
 
+  _computeHumanMask() {
+    let mask = 0;
+    for (let s = 0; s < 3; s++) {
+      if (this._getSeatController(1, s)) mask |= (1 << s);
+      if (this._getSeatController(2, s)) mask |= (1 << (3 + s));
+    }
+    return mask;
+  }
+
   sendNetworkState() {
     const packet = {
       type: 'state',
       score: this.score,
       time: Math.ceil(this.matchTime),
       state: this.state,
+      hm: this._computeHumanMask(),
       active1: this.activePlayerIdx1,
       active2: this.activePlayerIdx2,
       m1: Math.floor(this.specialMeter1),
@@ -2730,14 +2972,28 @@ export class FootballGame {
     this.goalShieldTeam = packet.shT || 0;
     this.goalShieldTimer = this.goalShieldTeam ? 1.0 : 0;
 
-    if (typeof packet.m1 === 'number') this.specialMeter1 = packet.m1;
+    if (typeof packet.hm === 'number') this.humanControlMask = packet.hm;
+
+    if (typeof packet.m1 === 'number') {
+      this.specialMeter1 = packet.m1;
+      if (this.localTeam === 1) {
+        if (this.specialMeter1 >= 100 && !this.specialAudioPlayed1) {
+          sounds.playSpecialReady();
+          this.specialAudioPlayed1 = true;
+        } else if (this.specialMeter1 < 100) {
+          this.specialAudioPlayed1 = false;
+        }
+      }
+    }
     if (typeof packet.m2 === 'number') {
       this.specialMeter2 = packet.m2;
-      if (this.specialMeter2 >= 100 && !this.specialAudioPlayed2) {
-        sounds.playSpecialReady();
-        this.specialAudioPlayed2 = true;
-      } else if (this.specialMeter2 < 100) {
-        this.specialAudioPlayed2 = false;
+      if (this.localTeam === 2) {
+        if (this.specialMeter2 >= 100 && !this.specialAudioPlayed2) {
+          sounds.playSpecialReady();
+          this.specialAudioPlayed2 = true;
+        } else if (this.specialMeter2 < 100) {
+          this.specialAudioPlayed2 = false;
+        }
       }
     }
 

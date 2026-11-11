@@ -1,20 +1,47 @@
-// Modulo di Rete P2P WebRTC con PeerJS
+// Modulo di Rete P2P WebRTC (Star Topology fino a 6 giocatori con PeerJS)
+const TURN_STORAGE_KEY = 'msoccer_turn_config';
+
 export class NetworkManager {
   constructor(callbacks = {}) {
     this.peer = null;
-    this.conn = null;
+    this.conn = null;         // Usato dal Client (connessione verso Host)
+    this.conns = new Map();   // Usato dall'Host: peerId -> DataConnection
     this.isHost = false;
     this.roomId = null;
     this.callbacks = callbacks;
     this.connected = false;
     this._connectTimeout = null;
-    this._iceServers = [
+    this._retryTimer = null;
+    this._baseStunServers = [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:global.stun.twilio.com:3478' }
     ];
+  }
+
+  static getTurnConfig() {
+    try {
+      const raw = localStorage.getItem(TURN_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static saveTurnConfig(cfg) {
+    try {
+      if (!cfg || !cfg.url) {
+        localStorage.removeItem(TURN_STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(TURN_STORAGE_KEY, JSON.stringify({
+        url: String(cfg.url || '').trim(),
+        user: String(cfg.user || '').trim(),
+        pass: String(cfg.pass || '').trim()
+      }));
+    } catch (_) {}
   }
 
   // Genera un ID stanza corto e amichevole
@@ -32,7 +59,6 @@ export class NetworkManager {
     let val = (rawInput || '').trim();
     if (!val) return '';
 
-    // Se l'utente ha incollato l'intero link (?room=MS-XXXX)
     const roomMatch = val.match(/[?&]room=([A-Za-z0-9_-]+)/i);
     if (roomMatch && roomMatch[1]) {
       val = roomMatch[1];
@@ -45,35 +71,90 @@ export class NetworkManager {
     return val;
   }
 
+  async _resolveIceServers() {
+    const servers = [...this._baseStunServers];
+    const cfg = NetworkManager.getTurnConfig();
+    if (!cfg || !cfg.url) return servers;
+
+    // Supporto opzionale API dinamica Metered.live
+    if (cfg.url.includes('.metered.live') && cfg.pass) {
+      try {
+        const cleanDomain = cfg.url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3500);
+        const resp = await fetch(
+          `https://${cleanDomain}/api/v1/turn/credentials?apiKey=${encodeURIComponent(cfg.pass)}`,
+          { signal: ctrl.signal }
+        );
+        clearTimeout(timer);
+        if (resp.ok) {
+          const list = await resp.json();
+          if (Array.isArray(list) && list.length > 0) {
+            return [...servers, ...list];
+          }
+        }
+      } catch (e) {
+        console.warn('[Network] Impossibile recuperare credenziali Metered TURN, uso STUN:', e);
+      }
+      return servers;
+    }
+
+    // Configurazione manuale turn: / turns:
+    let urls = cfg.url;
+    if (!/^turns?:/i.test(urls) && !/^stuns?:/i.test(urls)) {
+      urls = `turn:${urls}`;
+    }
+    const entry = { urls };
+    if (cfg.user) entry.username = cfg.user;
+    if (cfg.pass) entry.credential = cfg.pass;
+    servers.push(entry);
+    return servers;
+  }
+
   _clearConnectTimeout() {
     if (this._connectTimeout) {
       clearTimeout(this._connectTimeout);
       this._connectTimeout = null;
     }
+    if (this._retryTimer) {
+      clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+    }
   }
 
-  // Inizializza come Host (Crea partita)
-  hostGame(customCode = null) {
-    this.disconnect();
-    return new Promise((resolve, reject) => {
-      if (!window.Peer) {
-        const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
-        if (this.callbacks.onError) this.callbacks.onError(err);
-        reject(err);
-        return;
-      }
+  getConnectedPeerCount() {
+    if (this.isHost) {
+      let count = 0;
+      this.conns.forEach(c => {
+        if (c && c.open) count++;
+      });
+      return count;
+    }
+    return (this.conn && this.conn.open) ? 1 : 0;
+  }
 
+  // Inizializza come Host (accetta fino a 5 ospiti contemporaneamente per 1v1, 2v2 o 3v3)
+  async hostGame(customCode = null) {
+    this.disconnect();
+    if (!window.Peer) {
+      const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
+      if (this.callbacks.onError) this.callbacks.onError(err);
+      throw err;
+    }
+
+    const iceServers = await this._resolveIceServers();
+
+    return new Promise((resolve, reject) => {
       this.isHost = true;
       const code = this.normalizeRoomCode(customCode) || this.generateRoomCode();
       this.roomId = code;
 
       try {
-        // Usa i server cloud PeerJS per la negoziazione WebRTC
         this.peer = new window.Peer(code, {
           debug: 1,
           config: {
             iceCandidatePoolSize: 10,
-            iceServers: this._iceServers
+            iceServers
           }
         });
 
@@ -84,16 +165,17 @@ export class NetworkManager {
         });
 
         this.peer.on('connection', (conn) => {
-          if (this.conn && this.conn !== conn && this.conn.open) {
-            // Sostituisce vecchia connessione solo se l'amico si riconnette
-            try { this.conn.close(); } catch (_) {}
+          const prev = this.conns.get(conn.peer);
+          if (prev && prev !== conn) {
+            try { prev.close(); } catch (_) {}
           }
-          this.conn = conn;
-          this.setupConnection();
+          this.conns.set(conn.peer, conn);
+          this._setupPeerConnection(conn);
         });
 
+        // Mantiene attiva la segnalazione PeerJS finché la stanza esiste (per far entrare gli altri amici)
         this.peer.on('disconnected', () => {
-          if (this.peer && !this.peer.destroyed && !this.connected) {
+          if (this.peer && !this.peer.destroyed) {
             try { this.peer.reconnect(); } catch (_) {}
           }
         });
@@ -115,24 +197,25 @@ export class NetworkManager {
   }
 
   // Connettiti a una stanza esistente come Guest
-  joinGame(roomCode) {
+  async joinGame(roomCode) {
     this.disconnect();
-    return new Promise((resolve, reject) => {
-      if (!window.Peer) {
-        const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
-        if (this.callbacks.onError) this.callbacks.onError(err);
-        reject(err);
-        return;
-      }
+    if (!window.Peer) {
+      const err = new Error('Libreria PeerJS non caricata. Ricarica la pagina.');
+      if (this.callbacks.onError) this.callbacks.onError(err);
+      throw err;
+    }
 
+    const targetId = this.normalizeRoomCode(roomCode);
+    if (!targetId) {
+      const err = new Error('Codice stanza non valido.');
+      if (this.callbacks.onError) this.callbacks.onError(err);
+      throw err;
+    }
+
+    const iceServers = await this._resolveIceServers();
+
+    return new Promise((resolve, reject) => {
       this.isHost = false;
-      const targetId = this.normalizeRoomCode(roomCode);
-      if (!targetId) {
-        const err = new Error('Codice stanza non valido.');
-        if (this.callbacks.onError) this.callbacks.onError(err);
-        reject(err);
-        return;
-      }
       this.roomId = targetId;
 
       try {
@@ -140,7 +223,7 @@ export class NetworkManager {
           debug: 1,
           config: {
             iceCandidatePoolSize: 10,
-            iceServers: this._iceServers
+            iceServers
           }
         });
 
@@ -149,25 +232,43 @@ export class NetworkManager {
         this._connectTimeout = setTimeout(() => {
           if (!this.connected && !settled) {
             settled = true;
-            const timeoutErr = new Error(`Impossibile raggiungere la stanza ${targetId}. Verifica il codice o la connessione dell'Host.`);
+            const timeoutErr = new Error(
+              `Impossibile raggiungere ${targetId}. Se siete su reti 4G/Wi-Fi bloccate, configura un relay TURN nelle impostazioni.`
+            );
             if (this.callbacks.onError) this.callbacks.onError(timeoutErr);
             this.disconnect();
             reject(timeoutErr);
           }
-        }, 15000);
+        }, 18000);
 
-        this.peer.on('open', () => {
-          // Connessione WebRTC affidabile in formato JSON (niente bug BinaryPack o drop pacchetti critici)
+        const attemptConnect = (attemptNum) => {
+          if (!this.peer || this.peer.destroyed || settled || this.connected) return;
+          if (this.conn && !this.conn.open) {
+            const staleConn = this.conn;
+            this.conn = null;
+            try { staleConn.close(); } catch (_) {}
+          }
           this.conn = this.peer.connect(targetId, {
             reliable: true,
             serialization: 'json'
           });
-          this.setupConnection(() => {
+          this._setupPeerConnection(this.conn, () => {
             if (!settled) {
               settled = true;
               resolve(targetId);
             }
           });
+          if (attemptNum === 1) {
+            this._retryTimer = setTimeout(() => {
+              if (!this.connected && !settled && this.peer && !this.peer.destroyed) {
+                attemptConnect(2);
+              }
+            }, 6500);
+          }
+        };
+
+        this.peer.on('open', () => {
+          attemptConnect(1);
         });
 
         this.peer.on('error', (err) => {
@@ -175,7 +276,7 @@ export class NetworkManager {
           this._clearConnectTimeout();
           let msg = err.message || 'Errore di connessione P2P';
           if (err.type === 'peer-unavailable') {
-            msg = `Stanza "${targetId}" non trovata! Assicurati che il tuo amico abbia aperto la stanza.`;
+            msg = `Stanza "${targetId}" non trovata! Assicurati che l'Host abbia la stanza aperta.`;
           }
           const friendlyErr = new Error(msg);
           if (this.callbacks.onError) this.callbacks.onError(friendlyErr);
@@ -192,79 +293,136 @@ export class NetworkManager {
     });
   }
 
-  // Configura i gestori di eventi per la connessione dati aperta
-  setupConnection(onOpenExtra = null) {
-    if (!this.conn) return;
-    const activeConn = this.conn;
+  // Configura listener per singola DataConnection (Host multi-client e Client singolo)
+  _setupPeerConnection(activeConn, onOpenExtra = null) {
+    if (!activeConn) return;
+    const remotePeerId = activeConn.peer;
     let opened = false;
+    let iceRetried = false;
+
+    const isCurrentConn = () => (this.isHost
+      ? this.conns.get(remotePeerId) === activeConn
+      : this.conn === activeConn);
 
     const handleOpen = () => {
-      if (opened) return;
+      if (opened || !isCurrentConn()) return;
       opened = true;
       this._clearConnectTimeout();
       this.connected = true;
       if (onOpenExtra) onOpenExtra();
-      if (this.callbacks.onConnect) this.callbacks.onConnect(this.isHost);
+      if (this.isHost && this.callbacks.onPeerConnect) {
+        this.callbacks.onPeerConnect(remotePeerId, activeConn);
+      }
+      if (this.callbacks.onConnect) {
+        const reportedId = this.isHost
+          ? remotePeerId
+          : (this.peer && this.peer.id ? this.peer.id : remotePeerId);
+        this.callbacks.onConnect(this.isHost, reportedId);
+      }
     };
 
     activeConn.on('open', handleOpen);
-
-    // Gestione caso race-condition se già aperto sincronamente
     if (activeConn.open) {
       handleOpen();
     }
 
     activeConn.on('data', (data) => {
-      if (this.callbacks.onData) this.callbacks.onData(data);
+      if (!isCurrentConn()) return;
+      if (this.callbacks.onData) this.callbacks.onData(data, remotePeerId);
     });
 
     activeConn.on('close', () => {
-      if (this.conn === activeConn) {
+      if (this.isHost) {
+        if (this.conns.get(remotePeerId) === activeConn) {
+          this.conns.delete(remotePeerId);
+        }
+        const remaining = this.getConnectedPeerCount();
+        this.connected = remaining > 0;
+        if (opened && this.callbacks.onPeerDisconnect) {
+          this.callbacks.onPeerDisconnect(remotePeerId);
+        }
+        if (remaining === 0 && opened && this.callbacks.onDisconnect) {
+          this.callbacks.onDisconnect(remotePeerId);
+        }
+      } else if (this.conn === activeConn) {
         const wasConnected = this.connected;
         this.connected = false;
         this._clearConnectTimeout();
         if (wasConnected && this.callbacks.onDisconnect) {
-          this.callbacks.onDisconnect();
+          this.callbacks.onDisconnect(remotePeerId);
         }
       }
     });
 
     activeConn.on('error', (err) => {
-      console.error('Connection error:', err);
+      if (!isCurrentConn()) return;
+      console.error('Connection error:', remotePeerId, err);
       this._clearConnectTimeout();
       if (this.callbacks.onError) this.callbacks.onError(err);
     });
 
-    if (activeConn.peerConnection) {
-      activeConn.peerConnection.oniceconnectionstatechange = () => {
-        const state = activeConn.peerConnection && activeConn.peerConnection.iceConnectionState;
+    const attachIceMonitor = () => {
+      const pc = activeConn.peerConnection;
+      if (!pc || pc.__msIceMonitored) return;
+      pc.__msIceMonitored = true;
+      pc.addEventListener('iceconnectionstatechange', () => {
+        if (!isCurrentConn()) return;
+        const state = pc.iceConnectionState;
         if (state === 'failed') {
-          this._clearConnectTimeout();
-          const iceErr = new Error('Connessione diretta bloccata dalla rete (NAT/Firewall). Riprova o usa la stessa rete/Wi-Fi.');
-          if (this.callbacks.onError) this.callbacks.onError(iceErr);
+          if (!iceRetried && typeof pc.restartIce === 'function') {
+            iceRetried = true;
+            try { pc.restartIce(); } catch (_) {}
+            return;
+          }
+          if (!opened) {
+            this._clearConnectTimeout();
+            const iceErr = new Error(
+              'Connessione diretta bloccata da NAT/4G. Configura un relay TURN nelle impostazioni di rete.'
+            );
+            if (this.callbacks.onError) this.callbacks.onError(iceErr);
+          }
         }
-      };
+      });
+    };
+
+    attachIceMonitor();
+    activeConn.on('iceStateChanged', attachIceMonitor);
+  }
+
+  // Invia dati a uno specifico peer (solo Host)
+  sendTo(peerId, data, isVolatile = false) {
+    const target = this.conns.get(peerId);
+    this._sendOverConn(target, data, isVolatile);
+  }
+
+  _sendOverConn(target, data, isVolatile) {
+    if (!target || !target.open) return;
+    if (isVolatile && target.dataChannel && target.dataChannel.bufferedAmount > 65536) {
+      return;
+    }
+    try {
+      target.send(data);
+    } catch (e) {
+      console.warn('Invio pacchetto fallito:', e);
     }
   }
 
-  // Invia dati al peer collegato
+  // Invia dati: Host fa broadcast a tutti gli amici connessi; Client invia all'Host
   send(data, isVolatile = false) {
-    if (this.conn && this.conn.open) {
-      if (isVolatile && this.conn.dataChannel && this.conn.dataChannel.bufferedAmount > 65536) {
-        // Evita congestione del canale dati su pacchetti ad alta frequenza
-        return;
-      }
-      try {
-        this.conn.send(data);
-      } catch (e) {
-        console.warn('Invio pacchetto fallito:', e);
-      }
+    if (this.isHost) {
+      this.conns.forEach((conn) => this._sendOverConn(conn, data, isVolatile));
+    } else {
+      this._sendOverConn(this.conn, data, isVolatile);
     }
   }
 
   // Disconnetti e pulisci
   disconnect() {
     this._clearConnectTimeout();
+    this.conns.forEach((conn) => {
+      try { conn.close(); } catch (_) {}
+    });
+    this.conns.clear();
     if (this.conn) {
       try { this.conn.close(); } catch (_) {}
       this.conn = null;

@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>MSoccer - Calcio 2.5D Arcade Multiplayer</title>
-  <link rel="stylesheet" href="css/style.css?v=3.0">
+  <link rel="stylesheet" href="css/style.css?v=3.1">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>">
   
   <!-- Three.js e PeerJS (CDN affidabili e veloci) -->
@@ -29,7 +29,25 @@
   <div id="main-menu" class="modal-screen interactive">
     <div class="menu-box">
       <h1 class="title-glow">MSoccer</h1>
-      <div class="subtitle">Multiplayer Arcade 3 Contro 3</div>
+      <div class="subtitle">Multiplayer Arcade 1v1 • 2v2 • 3v3</div>
+
+      <div class="mode-selector" id="menu-mode-selector" role="group" aria-label="Modalità di controllo">
+        <button type="button" class="mode-pill active" data-mode="1v1">
+          <span class="mode-title">1v1</span>
+          <span class="mode-sub">Comandi Tutti</span>
+        </button>
+        <button type="button" class="mode-pill" data-mode="2v2">
+          <span class="mode-title">2v2</span>
+          <span class="mode-sub">Portiere CPU</span>
+        </button>
+        <button type="button" class="mode-pill" data-mode="3v3">
+          <span class="mode-title">3v3</span>
+          <span class="mode-sub">1 Giocatore</span>
+        </button>
+      </div>
+      <div id="mode-hint-menu" class="mode-hint">
+        1v1: ciascun giocatore controlla tutta la sua squadra (puoi cambiare giocatore).
+      </div>
 
       <div class="btn-group">
         <button id="btn-play-cpu" class="btn btn-primary">
@@ -53,23 +71,38 @@
   <div id="online-modal" class="modal-screen hidden interactive">
     <div class="menu-box">
       <h2 style="font-size: 2.8rem; color: var(--primary);">STANZA MULTIPLAYER</h2>
-      <div class="subtitle">Sfida un amico da qualsiasi dispositivo</div>
+      <div class="subtitle">Scegli il formato e sfida gli amici online</div>
 
       <div class="lobby-inputs">
+        <div class="mode-selector" id="online-mode-selector" role="group" aria-label="Formato stanza online">
+          <button type="button" class="mode-pill active" data-mode="1v1">
+            <span class="mode-title">1v1</span>
+            <span class="mode-sub">2 giocatori</span>
+          </button>
+          <button type="button" class="mode-pill" data-mode="2v2">
+            <span class="mode-title">2v2</span>
+            <span class="mode-sub">4 gi. • POR CPU</span>
+          </button>
+          <button type="button" class="mode-pill" data-mode="3v3">
+            <span class="mode-title">3v3</span>
+            <span class="mode-sub">6 gi. • 1 a testa</span>
+          </button>
+        </div>
+
         <button id="btn-create-room" class="btn btn-primary">
           <span>👑</span> Crea Nuova Partita (Host)
         </button>
 
         <div id="host-waiting-box" style="display: none; margin-top: 15px;">
-          <p style="color: #cbd5e1; font-size: 1.1rem; margin-bottom: 8px;">Codice Stanza:</p>
+          <p style="color: #cbd5e1; font-size: 1.1rem; margin-bottom: 8px;">Codice Stanza (<span id="host-room-mode-label" style="color:#00f0ff;">1v1</span>):</p>
           <div id="host-room-code" class="room-input" style="font-size: 2.2rem; color: #ffd700;">---</div>
-          <p style="margin: 10px 0; font-size: 0.9rem; color: #94a3b8;">Link diretto per il tuo amico:</p>
+          <p style="margin: 10px 0; font-size: 0.9rem; color: #94a3b8;">Link diretto per i tuoi amici:</p>
           <div id="room-share-url" class="room-share-badge">Generazione link...</div>
           <button id="btn-copy-link" class="btn btn-secondary" style="margin-top: 10px; width: 100%;">
             📋 Copia Link Partita
           </button>
-          <p style="color: #00f0ff; margin-top: 12px; font-size: 1rem; animation: pulse 1.5s infinite;">
-            In attesa che l'amico si connetta...
+          <p id="host-waiting-status" style="color: #00f0ff; margin-top: 12px; font-size: 1rem; animation: pulse 1.5s infinite;">
+            In attesa che gli amici si connettano...
           </p>
         </div>
 
@@ -79,11 +112,27 @@
           <div style="flex: 1; height: 1px; background: #2c4257;"></div>
         </div>
 
-        <p style="color: #cbd5e1; font-size: 1.1rem;">Entra con un codice esistente:</p>
-        <input type="text" id="join-room-input" class="room-input" placeholder="ES: MS-X7K2" maxlength="120" autocomplete="off" autocorrect="off" autocapitalize="characters" enterkeyhint="go">
+        <p style="color: #cbd5e1; font-size: 1.1rem;">Entra con un codice o link esistente:</p>
+        <input type="text" id="join-room-input" class="room-input" placeholder="ES: MS-X7K2 o link" maxlength="120" autocomplete="off" autocorrect="off" autocapitalize="characters" enterkeyhint="go">
         <button id="btn-join-room" class="btn btn-accent">
           <span>🚀</span> Unisciti alla Partita
         </button>
+
+        <details class="turn-settings">
+          <summary>⚙️ Su 4G o Wi-Fi bloccato? Configura relay TURN (opzionale)</summary>
+          <div class="turn-settings-body">
+            <p class="turn-help">
+              Su due Wi-Fi normali si connette senza nulla. Se il router o il 4G blocca la connessione diretta, incolla qui un server TURN gratuito (es. Metered OpenRelay o Twilio).
+            </p>
+            <input type="text" id="turn-url-input" class="turn-input" placeholder="turn:global.relay.metered.ca:80 o dominio.metered.live">
+            <input type="text" id="turn-user-input" class="turn-input" placeholder="Username TURN (o vuoto se Metered API Key)">
+            <input type="password" id="turn-pass-input" class="turn-input" placeholder="Password / API Key">
+            <div style="display: flex; gap: 8px; margin-top: 6px;">
+              <button type="button" id="btn-save-turn" class="btn btn-secondary" style="flex:1; padding:8px; font-size:1.1rem;">💾 Salva TURN</button>
+              <button type="button" id="btn-clear-turn" class="btn btn-secondary" style="padding:8px 12px; font-size:1.1rem;">🗑️</button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <button id="btn-back-menu" class="btn btn-secondary" style="margin-top: 15px;">
@@ -95,10 +144,19 @@
   <!-- 3. SCHERMATA DRAFT / SELEZIONE 12 PERSONAGGI -->
   <div id="draft-screen" class="modal-screen character-select-screen hidden interactive">
     <div class="draft-header">
-      <h2 style="font-size: 3rem; color: #fff;">SCEGLI I TUOI CAMPIONI (3v3)</h2>
+      <h2 style="font-size: 3rem; color: #fff;">SCEGLI I TUOI CAMPIONI</h2>
       <p id="draft-role-subtitle" style="color: var(--primary); font-size: 1.1rem; text-transform: uppercase;">
         Clicca su 3 personaggi per comporre la tua formazione
       </p>
+      <div id="draft-room-controls" class="draft-room-controls hidden">
+        <div id="online-players-badge" class="online-players-badge">👥 Connessi: 1/2</div>
+        <div class="mode-selector mode-selector-compact" id="draft-mode-selector">
+          <button type="button" class="mode-pill active" data-mode="1v1">1v1 Tutti</button>
+          <button type="button" class="mode-pill" data-mode="2v2">2v2 POR CPU</button>
+          <button type="button" class="mode-pill" data-mode="3v3">3v3 1 Gioc.</button>
+        </div>
+        <button type="button" id="btn-draft-copy-link" class="btn btn-secondary btn-mini">📋 Invita Amici</button>
+      </div>
     </div>
 
     <!-- Slot Squadre -->
@@ -106,17 +164,17 @@
       <div class="draft-team-card team-1">
         <h3 style="color: #e74c3c; font-size: 1.8rem;">SQUADRA 1 (ROSSI)</h3>
         <div class="picked-slots">
-          <div id="slot-t1-0" class="slot-item">Giocatore 1</div>
-          <div id="slot-t1-1" class="slot-item">Giocatore 2</div>
-          <div id="slot-t1-2" class="slot-item">Giocatore 3</div>
+          <div id="slot-t1-0" class="slot-item" data-team="1" data-slot="0">Giocatore 1</div>
+          <div id="slot-t1-1" class="slot-item" data-team="1" data-slot="1">Giocatore 2</div>
+          <div id="slot-t1-2" class="slot-item" data-team="1" data-slot="2">Giocatore 3</div>
         </div>
       </div>
       <div class="draft-team-card team-2">
         <h3 style="color: #2980b9; font-size: 1.8rem;">SQUADRA 2 (BLU)</h3>
         <div class="picked-slots">
-          <div id="slot-t2-0" class="slot-item">Giocatore 1</div>
-          <div id="slot-t2-1" class="slot-item">Giocatore 2</div>
-          <div id="slot-t2-2" class="slot-item">Giocatore 3</div>
+          <div id="slot-t2-0" class="slot-item" data-team="2" data-slot="0">Giocatore 1</div>
+          <div id="slot-t2-1" class="slot-item" data-team="2" data-slot="1">Giocatore 2</div>
+          <div id="slot-t2-2" class="slot-item" data-team="2" data-slot="2">Giocatore 3</div>
         </div>
       </div>
     </div>
@@ -321,6 +379,6 @@
   </div>
 
   <!-- Script Principale (ES Module) -->
-  <script type="module" src="js/app.js?v=3.0"></script>
+  <script type="module" src="js/app.js?v=3.1"></script>
 </body>
 </html>
